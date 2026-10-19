@@ -1,7 +1,13 @@
 import { createSourceRecord, deleteSourceRecord, findSourceByIdAndWorkspaceId, findSourcesByWorkspaceId, SourceRecord } from "../repositories/source.repository.js";
 import { NotFoundError } from "../types/app-error.js";
-import { CreateSourceInput, ListSourcesQuery } from "../validators/source.validator.js";
+import { CreateSourceInput, ImportWebSearchInput, ImportWebsiteInput, ImportYoutubeInput, ListSourcesQuery } from "../validators/source.validator.js";
 import { getWorkspaceByIdForUser } from "./workspace.service.js";
+
+// Web, PDF & YT
+import { uploadPdfToCloudinary } from "../lib/cloudinary.js";
+import { extractPdfFromBuffer } from "../lib/pdf.js";
+import { scrapeWebsite } from "../lib/firecrawl.js";
+import { fetchYoutubeTranscript } from "../lib/youtube.js";
 
 /**
  * Persists a source row and enqueues the Inngest processing pipeline.
@@ -132,4 +138,154 @@ export async function bulkDeleteSourcesForWorkspace(
     for (const sourceId of sourceIds) {
         await deleteSourceForWorkspace(workspaceId, sourceId, userId);
     }
+}
+
+
+/**
+ * Uploads a PDF to Cloudinary, optionally extracts text, and queues processing.
+ *
+ * Text extraction at upload time is best-effort; Inngest retries from Cloudinary if it fails.
+ *
+ * @param workspaceId - Workspace to attach the source to
+ * @param userId - Authenticated user's id
+ * @param file - Multer file buffer from the upload endpoint
+ * @param title - Optional custom title (defaults to filename without `.pdf`)
+ * @returns New PDF source with Cloudinary metadata and status `PENDING`
+ *
+ */
+export async function uploadPdfSource(
+    workspaceId: string,
+    userId: string,
+    file: Express.Multer.File,
+    title?: string,
+) {
+    await getWorkspaceByIdForUser(workspaceId, userId);
+
+    const upload = await uploadPdfToCloudinary(
+        file.buffer,
+        file.originalname,
+    );
+
+    let content: string | null = null;
+    let pageCount: number | undefined;
+
+    try {
+        const extracted = await extractPdfFromBuffer(file.buffer);
+        content = extracted.text;
+        pageCount = extracted.pageCount;
+    } catch {
+        // Inngest will retry extraction from Cloudinary if upload-time parse fails.
+    }
+
+    return createAndProcessSource({
+        workspaceId,
+        type: "PDF",
+        title: title?.trim() || file.originalname.replace(/\.pdf$/i, ""),
+        content,
+        status: "PENDING",
+        metadata: {
+            fileUrl: upload.secureUrl,
+            fileName: upload.originalFilename,
+            fileSize: upload.bytes,
+            publicId: upload.publicId,
+            resourceType: upload.resourceType,
+            pageCount,
+        },
+    });
+}
+
+/**
+ * Scrapes a website via Firecrawl and creates a source from the markdown content.
+ *
+ * @param workspaceId - Workspace to attach the source to
+ * @param userId - Authenticated user's id
+ * @param input - URL and optional custom title
+ * @returns New WEBSITE source with scraped markdown and status `PENDING`
+ *
+ */
+export async function importWebsiteSource(
+    workspaceId: string,
+    userId: string,
+    input: ImportWebsiteInput,
+) {
+    await getWorkspaceByIdForUser(workspaceId, userId);
+
+    const scraped = await scrapeWebsite(input.url);
+
+    return createAndProcessSource({
+        workspaceId,
+        type: "WEBSITE",
+        title: input.title || scraped.title || input.url,
+        content: scraped.markdown,
+        url: scraped.sourceUrl,
+        status: "PENDING",
+        metadata: {
+            importedFrom: scraped.sourceUrl,
+        },
+    });
+}
+
+
+/**
+ * Fetches a YouTube transcript and creates a source from the caption text.
+ *
+ * @param workspaceId - Workspace to attach the source to
+ * @param userId - Authenticated user's id
+ * @param input - YouTube URL and optional custom title
+ * @returns New YOUTUBE source with transcript content and status `PENDING`
+ *
+ */
+export async function importYoutubeSource(
+    workspaceId: string,
+    userId: string,
+    input: ImportYoutubeInput,
+) {
+    await getWorkspaceByIdForUser(workspaceId, userId);
+
+    const transcript = await fetchYoutubeTranscript(input.url);
+
+    return createAndProcessSource({
+        workspaceId,
+        type: "YOUTUBE",
+        title: input.title || `YouTube: ${transcript.videoId}`,
+        content: transcript.content,
+        url: input.url,
+        status: "PENDING",
+        metadata: {
+            videoId: transcript.videoId,
+        },
+    });
+}
+
+
+/**
+ * Saves web search results (from Tavily) as a WEBSITE source for RAG indexing.
+ *
+ * Used when the user chooses to add a web search result to their workspace sources.
+ *
+ * @param workspaceId - Workspace to attach the source to
+ * @param userId - Authenticated user's id
+ * @param input - Title, scraped content, and source URL from search
+ * @returns New WEBSITE source with status `PENDING`
+ *
+ */
+export async function importWebSearchSource(
+    workspaceId: string,
+    userId: string,
+    input: ImportWebSearchInput,
+) {
+    await getWorkspaceByIdForUser(workspaceId, userId);
+
+    return createAndProcessSource({
+        workspaceId,
+        type: "WEBSITE",
+        title: input.title,
+        content: input.content,
+        url: input.url,
+        status: "PENDING",
+        metadata: {
+            importedFrom: "web-search",
+            sourceUrl: input.url,
+        },
+    });
 }
