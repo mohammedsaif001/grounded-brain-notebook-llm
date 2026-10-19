@@ -57,6 +57,11 @@ import {
     getTextFromUIMessage,
 } from "../utils/chat-message.js";
 import { getWorkspaceByIdForUser } from "./workspace.service.js";
+import {
+    formatTavilyResultsForPrompt,
+    searchWeb,
+    type TavilySearchResponse,
+} from "../lib/tavily.js";
 
 /**
  * Lists all conversations in a workspace for the sidebar/history UI.
@@ -223,6 +228,8 @@ export async function streamWorkspaceChat(
     const requestedModel = input.model ?? workspace.defaultModel;
     const chatModel =
         CHAT_MODELS.find((model) => model === requestedModel) ?? CHAT_MODEL;
+    const webSearchEnabled =
+        input.webSearch === true && !!process.env.TAVILY_API_KEY?.trim();
 
     const userText = getLastUserMessageText(input.messages);
     if (!userText) {
@@ -241,7 +248,10 @@ export async function streamWorkspaceChat(
         content: userText,
     });
 
-    const retrievedChunks = await retrieveWorkspaceContext(workspaceId, userText);
+    const [retrievedChunks] = await Promise.all([
+        retrieveWorkspaceContext(workspaceId, userText),
+        // searchUserMemories(userId, userText),
+    ]);
 
     const citations = retrievedChunks.map((chunk) => ({
         sourceId: chunk.sourceId,
@@ -253,24 +263,52 @@ export async function streamWorkspaceChat(
         excerpt: chunk.text.slice(0, 280),
         score: chunk.score,
     }));
-
     const systemPrompt = buildChatSystemPrompt({
         chunks: retrievedChunks,
         conversationSummary: conversation.summary,
+        // userMemories: userMemories.map((memory) => memory.memory),
+        webSearchEnabled,
     });
 
     const contextMessages =
-        conversation.summary && input.messages.length > RECENT_MESSAGE_WINDOW
+        conversation.summary &&
+            input.messages.length > RECENT_MESSAGE_WINDOW
             ? input.messages.slice(-RECENT_MESSAGE_WINDOW)
             : input.messages;
+
+    let webSearchResults: TavilySearchResponse | null = null;
 
     const stream = createUIMessageStream({
         originalMessages: input.messages,
         execute: async ({ writer }) => {
+            const tools =
+                webSearchEnabled
+                    ? {
+                        web_search: tool({
+                            description:
+                                "Search the web for up-to-date information outside the workspace sources.",
+                            inputSchema: z.object({
+                                query: z
+                                    .string()
+                                    .describe(
+                                        "The search query for current web information",
+                                    ),
+                            }),
+                            execute: async ({ query }) => {
+                                const results = await searchWeb(query);
+                                webSearchResults = results;
+                                return formatTavilyResultsForPrompt(results);
+                            },
+                        }),
+                    }
+                    : undefined;
+
             const result = streamText({
                 model: openai(chatModel),
                 system: systemPrompt,
                 messages: await convertToModelMessages(contextMessages),
+                tools,
+                stopWhen: webSearchEnabled ? isStepCount(3) : undefined,
             });
 
             writer.merge(toUIMessageStream({ stream: result.stream }));
@@ -285,11 +323,21 @@ export async function streamWorkspaceChat(
                 return;
             }
 
+            const webCitations = webSearchResults
+                ? webSearchResults.results.map((result) => ({
+                    sourceType: "WEB" as const,
+                    sourceTitle: result.title,
+                    url: result.url,
+                    excerpt: result.content.slice(0, 280),
+                }))
+                : [];
+            const allCitations = [...citations, ...webCitations];
+
             await createMessageRecord({
                 conversationId: conversation.id,
                 role: "ASSISTANT",
                 content: assistantText,
-                citations,
+                citations: allCitations,
             });
 
             await touchConversation(conversation.id);
@@ -299,12 +347,39 @@ export async function streamWorkspaceChat(
                     title: buildConversationTitle(userText),
                 });
             }
+
+            const messageCount = await countMessagesByConversationId(
+                conversation.id,
+            );
+
+            // if (messageCount % CONVERSATION_SUMMARY_INTERVAL === 0) {
+            //     await enqueueConversationSummarize({
+            //         conversationId: conversation.id,
+            //         userId,
+            //     });
+            // }
+
+            // void addMemoriesFromMessages(
+            //     userId,
+            //     [
+            //         { role: "user", content: userText },
+            //         { role: "assistant", content: assistantText },
+            //     ],
+            //     {
+            //         source: "learned",
+            //         conversationId: conversation.id,
+            //     },
+            // ).catch((error) => {
+            //     console.error("Mem0 add failed:", error);
+            // });
         },
     });
 
     await pipeUIMessageStreamToResponse({
         response: res,
         stream,
-        headers: { "X-Conversation-Id": conversation.id },
+        headers: {
+            "X-Conversation-Id": conversation.id,
+        },
     });
 }
