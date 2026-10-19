@@ -3,11 +3,12 @@ import {
     type Index,
     type PineconeRecord,
 } from "@pinecone-database/pinecone";
+import { env } from "../config/env.js";
 import { EMBEDDING_DIMENSIONS } from "./ai-config.js";
 
 let pineconeClient: Pinecone | null = null;
 let indexReady = false;
-const indexName = process.env.PINECONE_INDEX ?? "grounded-brain-notebook-llm";
+const indexName = env.PINECONE_INDEX;
 
 
 /**
@@ -19,16 +20,10 @@ const indexName = process.env.PINECONE_INDEX ?? "grounded-brain-notebook-llm";
 
 /**
  * Returns a singleton Pinecone client.
- *
- * @throws When `PINECONE_API_KEY` is missing
  */
 function getPineconeClient() {
-    if (!process.env.PINECONE_API_KEY) {
-        throw new Error("PINECONE_API_KEY is not configured");
-    }
-
     if (!pineconeClient) {
-        pineconeClient = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
+        pineconeClient = new Pinecone({ apiKey: env.PINECONE_API_KEY });
     }
 
     return pineconeClient;

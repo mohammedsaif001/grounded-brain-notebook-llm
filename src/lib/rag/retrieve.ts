@@ -6,7 +6,7 @@
  */
 
 import { generateText } from "ai";
-import { openai } from "@ai-sdk/openai";
+import { openai } from "../openai.js";
 import { CHAT_MODEL, RAG_MIN_SCORE, RAG_TOP_K } from "../ai-config.js";
 import { embedTexts } from "../openai.js";
 import { queryWorkspaceVectors } from "../pinecone.js";

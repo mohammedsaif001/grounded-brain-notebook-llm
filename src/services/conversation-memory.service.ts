@@ -1,5 +1,5 @@
 import { generateText } from "ai";
-import { openai } from "@ai-sdk/openai";
+import { openai } from "../lib/openai.js";
 import { CHAT_MODEL } from "../lib/ai-config.js";
 import { addMemoriesFromMessages } from "../lib/mem0.js";
 import {

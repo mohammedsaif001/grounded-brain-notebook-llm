@@ -15,7 +15,6 @@
  * ```
  */
 
-import { openai } from "@ai-sdk/openai";
 import type { Response } from "express";
 import { z } from "zod";
 import {
@@ -35,6 +34,8 @@ import {
     QUERY_REWRITE_WINDOW,
     RECENT_MESSAGE_WINDOW,
 } from "../lib/ai-config.js";
+import { env } from "../config/env.js";
+import { openai } from "../lib/openai.js";
 import {
     buildChatSystemPrompt,
     buildUserPromptWithContext,
@@ -266,7 +267,7 @@ export async function streamWorkspaceChat(
     const chatModel =
         CHAT_MODELS.find((model) => model === requestedModel) ?? CHAT_MODEL;
     const webSearchEnabled =
-        input.webSearch === true && !!process.env.TAVILY_API_KEY?.trim();
+        input.webSearch === true && !!env.TAVILY_API_KEY;
 
     const userText = getLastUserMessageText(input.messages);
     if (!userText) {

@@ -1,5 +1,6 @@
 
 import { tavily } from "@tavily/core";
+import { env } from "../config/env.js";
 
 export type TavilySearchResult = {
     title: string;
@@ -25,7 +26,7 @@ let client: ReturnType<typeof tavily> | null = null;
  *
  */
 export async function searchWeb(query: string): Promise<TavilySearchResponse> {
-    const apiKey = process.env.TAVILY_API_KEY?.trim();
+    const apiKey = env.TAVILY_API_KEY;
 
     if (!apiKey) {
         throw new Error("TAVILY_API_KEY is not configured");

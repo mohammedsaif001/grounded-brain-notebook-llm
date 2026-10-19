@@ -1,11 +1,13 @@
 /**
- * OpenAI SDK client for embeddings (RAG indexing and query embedding).
+ * OpenAI clients configured from validated env.
  *
- * Chat generation uses the AI SDK (`@ai-sdk/openai`) instead of this client.
- * Requires `OPENAI_API_KEY` in the environment.
+ * - `openai`: AI SDK provider for chat/generation (`openai(CHAT_MODEL)`)
+ * - `embedTexts`: OpenAI SDK client for embeddings (RAG indexing and query embedding)
  */
 
 import OpenAI from "openai";
+import { createOpenAI } from "@ai-sdk/openai";
+import { env } from "../config/env.js";
 import {
     CHAT_MODEL,
     EMBEDDING_DIMENSIONS,
@@ -13,6 +15,9 @@ import {
 } from "./ai-config.js";
 
 export { CHAT_MODEL, EMBEDDING_DIMENSIONS, EMBEDDING_MODEL };
+
+/** AI SDK OpenAI provider; use instead of the default `openai` export so the key comes from `env`. */
+export const openai = createOpenAI({ apiKey: env.OPENAI_API_KEY });
 
 let client: OpenAI | null = null;
 
@@ -24,7 +29,6 @@ let client: OpenAI | null = null;
  *
  * @param texts - Strings to embed (empty array returns immediately)
  * @returns Embedding vectors in the same order as input texts (1536 dimensions each)
- * @throws When `OPENAI_API_KEY` is not configured
  *
  *
  */
@@ -33,12 +37,8 @@ export async function embedTexts(texts: string[]): Promise<number[][]> {
         return [];
     }
 
-    if (!process.env.OPENAI_API_KEY) {
-        throw new Error("OPENAI_API_KEY is not configured");
-    }
-
     if (!client) {
-        client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        client = new OpenAI({ apiKey: env.OPENAI_API_KEY });
     }
 
     const response = await client.embeddings.create({

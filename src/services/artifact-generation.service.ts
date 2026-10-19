@@ -1,5 +1,5 @@
 import { generateText, Output } from "ai";
-import { openai } from "@ai-sdk/openai";
+import { openai } from "../lib/openai.js";
 import { z } from "zod";
 import {
     ARTIFACT_CONDENSE_SEGMENT_CHARS,

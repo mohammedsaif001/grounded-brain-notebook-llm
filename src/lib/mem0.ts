@@ -1,4 +1,5 @@
 import { MemoryClient, MemoryNotFoundError } from "mem0ai";
+import { env } from "../config/env.js";
 import { MEMORY_SEARCH_MIN_SCORE, MEMORY_SEARCH_TOP_K } from "./ai-config.js";
 
 let client: MemoryClient | null = null;
@@ -10,7 +11,7 @@ let client: MemoryClient | null = null;
  * @throws When `MEM0_API_KEY` is missing
  */
 export function getMem0Client() {
-    const apiKey = process.env.MEM0_API_KEY?.trim();
+    const apiKey = env.MEM0_API_KEY;
 
     if (!apiKey) {
         throw new Error("MEM0_API_KEY is not configured");
@@ -82,7 +83,7 @@ function mapMemory(record: {
  *
  */
 export async function listUserMemories(userId: string) {
-    if (!process.env.MEM0_API_KEY?.trim()) {
+    if (!env.MEM0_API_KEY) {
         return [];
     }
 
@@ -105,7 +106,7 @@ export async function listUserMemories(userId: string) {
  *
  */
 export async function searchUserMemories(userId: string, query: string) {
-    if (!process.env.MEM0_API_KEY?.trim() || !query.trim()) {
+    if (!env.MEM0_API_KEY || !query.trim()) {
         return [];
     }
 
@@ -166,7 +167,7 @@ export async function addMemoriesFromMessages(
     messages: Mem0Message[],
     metadata?: Record<string, unknown>,
 ) {
-    if (!process.env.MEM0_API_KEY?.trim() || messages.length === 0) {
+    if (!env.MEM0_API_KEY || messages.length === 0) {
         return;
     }
 

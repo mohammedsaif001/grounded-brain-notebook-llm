@@ -1,4 +1,4 @@
-import 'dotenv/config'
+import { env } from './config/env.js';
 import cors from 'cors'
 import express from 'express'
 import { errorHandler } from './middleware/error-handler.middleware.js';
@@ -11,11 +11,8 @@ import { inngest } from './inngest/client.js';
 import { functions } from "./inngest/index.js";
 
 const app = express();
-const port = process.env.PORT ?? 8080;
-const clientUrl = process.env.CLIENT_URL ?? 'http://localhost:3000';
-
 app.use(cors({
-    origin: clientUrl,
+    origin: env.CLIENT_URL,
     credentials: true
 }))
 
@@ -41,6 +38,6 @@ app.get("/api/me", requireAuth, (req, res) => {
 
 app.use(errorHandler);
 
-app.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}`);
+app.listen(env.PORT, () => {
+    console.log(`Server running on http://localhost:${env.PORT}`);
 })

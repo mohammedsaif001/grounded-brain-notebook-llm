@@ -11,34 +11,35 @@
 
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
+import { env, isProduction } from "../config/env.js";
 import prisma from "./db.js";
-
-
-const clientUrl = process.env.CLIENT_URL ?? "http://localhost:3000";
 
 /**
  * Configured Better Auth instance shared by Express route handlers.
  *
  */
 export const auth = betterAuth({
-    baseURL: process.env.BETTER_AUTH_URL ?? clientUrl,
-    secret: process.env.BETTER_AUTH_SECRET,
-    trustedOrigins: [clientUrl],
+    baseURL: env.BETTER_AUTH_URL ?? env.CLIENT_URL,
+    secret: env.BETTER_AUTH_SECRET,
+    trustedOrigins: [env.CLIENT_URL],
     database: prismaAdapter(prisma, {
         provider: "postgresql",
     }),
 
-    // Google OAuth configuration
-    socialProviders: {
-        google: {
-            clientId: process.env.GOOGLE_CLIENT_ID!,
-            clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-            // Optional: restrict to your domain
-            // prompt: "select_account",
-        },
-    },
+    // Google OAuth configuration (env validation guarantees both or neither are set)
+    socialProviders:
+        env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
+            ? {
+                google: {
+                    clientId: env.GOOGLE_CLIENT_ID,
+                    clientSecret: env.GOOGLE_CLIENT_SECRET,
+                    // Optional: restrict to your domain
+                    // prompt: "select_account",
+                },
+            }
+            : {},
     emailAndPassword: {
         // Dev/testing convenience. Turned OFF when NODE_ENV=production.
-        enabled: process.env.NODE_ENV !== "production",
+        enabled: !isProduction,
     },
 });

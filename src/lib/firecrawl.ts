@@ -5,6 +5,7 @@
  */
 
 import Firecrawl from "@mendable/firecrawl-js";
+import { env } from "../config/env.js";
 import { ValidationError } from "../types/app-error.js";
 
 /**
@@ -15,7 +16,7 @@ import { ValidationError } from "../types/app-error.js";
  * @throws {ValidationError} When Firecrawl is not configured or extraction fails
  */
 export async function scrapeWebsite(url: string) {
-    const apiKey = process.env.FIRECRAWL_API_KEY;
+    const apiKey = env.FIRECRAWL_API_KEY;
 
     if (!apiKey) {
         throw new ValidationError("Firecrawl is not configured on the server");

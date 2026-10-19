@@ -9,6 +9,7 @@
 import { PrismaClient } from "../generated/prisma/client.js";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
+import { env, isProduction } from "../config/env.js";
 
 const globalForPrisma = globalThis as unknown as {
     prisma: PrismaClient | undefined;
@@ -19,12 +20,12 @@ const prisma =
     new PrismaClient({
         adapter: new PrismaPg(
             new Pool({
-                connectionString: process.env.DATABASE_URL,
+                connectionString: env.DATABASE_URL,
             }),
         ),
     });
 
-if (process.env.NODE_ENV !== "production") {
+if (!isProduction) {
     globalForPrisma.prisma = prisma;
 }
 
