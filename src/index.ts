@@ -5,6 +5,7 @@ import { errorHandler } from './middleware/error-handler.middleware.js';
 import { registerRoutes } from './routes/index.js';
 import { toNodeHandler } from "better-auth/node";
 import { auth } from "./lib/auth.js";
+import { requireAuth } from './middleware/require-auth-middleware.js';
 
 const app = express();
 const port = process.env.PORT ?? 8080;
@@ -27,6 +28,9 @@ app.get('/health', (_req, res) => {
 })
 
 registerRoutes(app);
+app.get("/api/me", requireAuth, (req, res) => {
+    res.json(req.session.user);
+});
 
 app.use(errorHandler);
 

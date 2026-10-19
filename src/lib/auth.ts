@@ -29,12 +29,16 @@ export const auth = betterAuth({
     }),
 
     // Google OAuth configuration
-    providers: {
+    socialProviders: {
         google: {
             clientId: process.env.GOOGLE_CLIENT_ID!,
             clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
             // Optional: restrict to your domain
             // prompt: "select_account",
         },
+    },
+    emailAndPassword: {
+        // Dev/testing convenience. Turned OFF when NODE_ENV=production.
+        enabled: process.env.NODE_ENV !== "production",
     },
 });
