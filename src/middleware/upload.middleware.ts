@@ -9,13 +9,18 @@ export const pdfUpload = multer({
         fileSize: MAX_PDF_SIZE_BYTES,
     },
     fileFilter: (_req, file, cb) => {
-        if (file.mimetype === "application/pdf") {
+        const isPdfMime =
+            file.mimetype === "application/pdf" ||
+            file.mimetype === "application/x-pdf";
+        const isPdfExt = file.originalname.toLowerCase().endsWith(".pdf");
+
+        if (isPdfMime || (isPdfExt && file.mimetype === "application/octet-stream")) {
             cb(null, true);
-            return
-        } 
+            return;
+        }
 
         cb(new Error("Only PDF files are allowed"));
-    }
+    },
 })
 
 
