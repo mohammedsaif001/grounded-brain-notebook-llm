@@ -62,6 +62,8 @@ import {
     searchWeb,
     type TavilySearchResponse,
 } from "../lib/tavily.js";
+import { addMemoriesFromMessages, searchUserMemories } from "../lib/mem0.js";
+import { enqueueConversationSummarize } from "../lib/conversation-events.js";
 
 /**
  * Lists all conversations in a workspace for the sidebar/history UI.
@@ -248,9 +250,9 @@ export async function streamWorkspaceChat(
         content: userText,
     });
 
-    const [retrievedChunks] = await Promise.all([
+    const [retrievedChunks, userMemories] = await Promise.all([
         retrieveWorkspaceContext(workspaceId, userText),
-        // searchUserMemories(userId, userText),
+        searchUserMemories(userId, userText),
     ]);
 
     const citations = retrievedChunks.map((chunk) => ({
@@ -266,7 +268,7 @@ export async function streamWorkspaceChat(
     const systemPrompt = buildChatSystemPrompt({
         chunks: retrievedChunks,
         conversationSummary: conversation.summary,
-        // userMemories: userMemories.map((memory) => memory.memory),
+        userMemories: userMemories.map((memory) => memory.memory),
         webSearchEnabled,
     });
 
@@ -352,26 +354,26 @@ export async function streamWorkspaceChat(
                 conversation.id,
             );
 
-            // if (messageCount % CONVERSATION_SUMMARY_INTERVAL === 0) {
-            //     await enqueueConversationSummarize({
-            //         conversationId: conversation.id,
-            //         userId,
-            //     });
-            // }
+            if (messageCount % CONVERSATION_SUMMARY_INTERVAL === 0) {
+                await enqueueConversationSummarize({
+                    conversationId: conversation.id,
+                    userId,
+                });
+            }
 
-            // void addMemoriesFromMessages(
-            //     userId,
-            //     [
-            //         { role: "user", content: userText },
-            //         { role: "assistant", content: assistantText },
-            //     ],
-            //     {
-            //         source: "learned",
-            //         conversationId: conversation.id,
-            //     },
-            // ).catch((error) => {
-            //     console.error("Mem0 add failed:", error);
-            // });
+            void addMemoriesFromMessages(
+                userId,
+                [
+                    { role: "user", content: userText },
+                    { role: "assistant", content: assistantText },
+                ],
+                {
+                    source: "learned",
+                    conversationId: conversation.id,
+                },
+            ).catch((error) => {
+                console.error("Mem0 add failed:", error);
+            });
         },
     });
 
