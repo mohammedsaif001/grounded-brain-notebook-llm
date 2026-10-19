@@ -98,7 +98,7 @@ export function buildChatSystemPrompt(input: {
     webSearchEnabled?: boolean;
 }) {
     const sections: string[] = [
-        "You are Grounded Brain Notebook assistant that helps users learn from their workspace sources.",
+        "You are Grounded Brain Notebook an assistant that helps users learn from their workspace sources.",
     ];
 
     if (input.webSearchEnabled) {
