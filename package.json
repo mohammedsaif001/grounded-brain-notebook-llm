@@ -2,11 +2,11 @@
   "name": "grounded-brain-notebook-llm",
   "version": "1.0.0",
   "description": "Grounded Brain - A Notebook LLM Clone / Gemini Notebook",
-  "main": "dist/index.js",
+  "main": "dist/server.js",
   "scripts": {
-    "dev": "prisma generate && tsx watch src/index.ts",
+    "dev": "prisma generate && tsx watch src/server.ts",
     "build": "prisma generate && tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/server.js"
   },
   "repository": {
     "type": "git",

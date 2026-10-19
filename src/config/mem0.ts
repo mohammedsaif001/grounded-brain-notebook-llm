@@ -2,12 +2,12 @@
  * Mem0 API client.
  *
  * Only the connection lives here; memory reads and writes go through
- * {@link MemoryRepository} in `repositories/memory.repository.ts`.
+ * {@link MemoryRepository} in `features/memory/memory.repository.ts`.
  */
 
 import { MemoryClient } from "mem0ai";
 import { env } from "./env.js";
-import { APIError } from "../utils/api-error.js";
+import { APIError } from "../shared/http/api-error.js";
 
 export class Mem0Client {
     private static client: MemoryClient | null = null;

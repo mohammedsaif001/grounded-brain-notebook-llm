@@ -2,7 +2,7 @@
  * Cloudinary configuration.
  *
  * Uploads use an unsigned preset (no API secret needed); signed download URLs for
- * private PDFs need the API key and secret. Upload logic lives in `lib/sources/cloudinary.ts`.
+ * private PDFs need the API key and secret. Upload logic lives in `features/source/ingestion/cloudinary.ts`.
  */
 
 import { v2 as cloudinary } from "cloudinary";

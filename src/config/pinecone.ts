@@ -2,7 +2,7 @@
  * Pinecone client and index bootstrap.
  *
  * Only the connection lives here; vector reads and writes go through
- * {@link VectorRepository} in `repositories/vector.repository.ts`.
+ * {@link VectorRepository} in `shared/ai/vector.repository.ts`.
  *
  * In Vector DB compared to RDBMS:
  * Index -> Database, Namespace -> Schema, Vector -> Row

@@ -2,7 +2,7 @@
  * OpenAI clients configured from validated env.
  *
  * - `openai`: AI SDK provider for chat/generation (`openai(CHAT_MODEL)`)
- * - `openaiClient`: OpenAI SDK client (used for embeddings in `lib/rag/embeddings.ts`)
+ * - `openaiClient`: OpenAI SDK client (used for embeddings in `shared/ai/embeddings.ts`)
  */
 
 import OpenAI from "openai";
