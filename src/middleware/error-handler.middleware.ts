@@ -1,16 +1,22 @@
 import type { NextFunction, Request, Response } from "express";
 import { flattenError, ZodError } from "zod";
 import { AppError } from "../types/app-error.js";
+import multer from "multer";
 
-export function errorHandler(error:unknown,_req:Request,res:Response,_next:NextFunction) {
+export function errorHandler(
+    error: unknown,
+    _req: Request,
+    res: Response,
+    _next: NextFunction,
+) {
     if (error instanceof AppError) {
         return res.status(error.statuscode).json({
-            error:error.message,
-            details:error.details
-        })
-    }
+        error: error.message,
+        details: error.details,
+    });
+  }
 
-     if (error instanceof ZodError) {
+    if (error instanceof ZodError) {
         res.status(400).json({
             error: "Validation failed",
             details: flattenError(error).fieldErrors,
@@ -18,6 +24,33 @@ export function errorHandler(error:unknown,_req:Request,res:Response,_next:NextF
         return;
     }
 
+    if (error instanceof multer.MulterError) {
+        res.status(400).json({ error: error.message });
+        return;
+    }
+
+    if (
+        error instanceof Error &&
+        error.message === "Only PDF files are allowed"
+    ) {
+        res.status(400).json({ error: error.message });
+        return;
+    }
+
+    const cloudinaryError = error as Error & {
+        http_code?: number;
+        name?: string;
+    };
+    if (
+        cloudinaryError.name === "UnexpectedResponse" &&
+        cloudinaryError.http_code === 403
+    ) {
+        res.status(400).json({
+            error:
+                "Cloudinary upload rejected: your API key is missing Upload (create) permission. In Cloudinary Dashboard → Settings → API Keys, use the root secret or create a key with Upload enabled.",
+        });
+        return;
+    }
     console.error(error);
     res.status(500).json({ error: "Internal server error" });
 }
