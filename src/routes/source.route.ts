@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { asyncHandler } from "../utils/async-handler.js";
-import { bulkDeleteSources, createSource, deleteSource, getSource, importWebSearch, importWebsite, importYoutube, listSources, uploadPdf } from "../controllers/source.controller.js";
+import { bulkDeleteSources, createSource, deleteSource, getSource, getSourceChunks, importWebSearch, importWebsite, importYoutube, listSources, reprocessSource, reprocessSources, uploadPdf } from "../controllers/source.controller.js";
 import { uploadSinglePdf } from "../middleware/upload.middleware.js";
 
 export const sourceRoutes = Router({ mergeParams: true });
@@ -20,3 +20,6 @@ sourceRoutes.post(
 sourceRoutes.post("/import/website", asyncHandler(importWebsite));
 sourceRoutes.post("/import/youtube", asyncHandler(importYoutube));
 sourceRoutes.post("/import/web-search", asyncHandler(importWebSearch));
+sourceRoutes.post("/reprocess", asyncHandler(reprocessSources));
+sourceRoutes.get("/:sourceId/chunks", asyncHandler(getSourceChunks));
+sourceRoutes.post("/:sourceId/reprocess", asyncHandler(reprocessSource));

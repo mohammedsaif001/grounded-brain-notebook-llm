@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 
-import { bulkDeleteSourcesSchema, createSourceSchema, importWebSearchSchema, importWebsiteSchema, importYoutubeSchema, listSourcesQuerySchema, sourceIdParamSchema, workspaceIdParamSchema } from "../validators/source.validator.js";
-import { bulkDeleteSourcesForWorkspace, createTextOrMarkdownSource, deleteSourceForWorkspace, getSourceForWorkspace, importWebSearchSource, importWebsiteSource, importYoutubeSource, listSourcesForWorkspace, uploadPdfSource } from "../services/source.service.js";
+import { bulkDeleteSourcesSchema, createSourceSchema, importWebSearchSchema, importWebsiteSchema, importYoutubeSchema, listSourcesQuerySchema, reprocessSourcesSchema, sourceIdParamSchema, workspaceIdParamSchema } from "../validators/source.validator.js";
+import { bulkDeleteSourcesForWorkspace, createTextOrMarkdownSource, deleteSourceForWorkspace, getSourceChunksForWorkspace, getSourceForWorkspace, importWebSearchSource, importWebsiteSource, importYoutubeSource, listSourcesForWorkspace, reprocessSourceForWorkspace, reprocessSourcesForWorkspace, uploadPdfSource } from "../services/source.service.js";
 import { ValidationError } from "../types/app-error.js";
 
 export async function listSources(req: Request, res: Response) {
@@ -107,4 +107,37 @@ export async function importWebSearch(req: Request, res: Response) {
         input,
     );
     res.status(201).json(source);
+}
+
+
+export async function getSourceChunks(req: Request, res: Response) {
+    const { workspaceId, sourceId } = sourceIdParamSchema.parse(req.params);
+    const result = await getSourceChunksForWorkspace(
+        workspaceId,
+        sourceId,
+        req.session.user.id,
+    );
+    res.json(result);
+}
+
+
+export async function reprocessSources(req: Request, res: Response) {
+    const { workspaceId } = workspaceIdParamSchema.parse(req.params);
+    const input = reprocessSourcesSchema.parse(req.body ?? {});
+    const result = await reprocessSourcesForWorkspace(
+        workspaceId,
+        req.session.user.id,
+        input,
+    );
+    res.json(result);
+}
+
+export async function reprocessSource(req: Request, res: Response) {
+    const { workspaceId, sourceId } = sourceIdParamSchema.parse(req.params);
+    await reprocessSourceForWorkspace(
+        workspaceId,
+        sourceId,
+        req.session.user.id,
+    );
+    res.status(202).json({ reprocessed: true });
 }

@@ -1,6 +1,6 @@
-import { createSourceRecord, deleteSourceRecord, findSourceByIdAndWorkspaceId, findSourcesByWorkspaceId, SourceRecord } from "../repositories/source.repository.js";
+import { createSourceRecord, deleteSourceRecord, findSourceByIdAndWorkspaceId, findSourcesByWorkspaceId, SourceRecord, updateSourceRecord } from "../repositories/source.repository.js";
 import { NotFoundError } from "../types/app-error.js";
-import { CreateSourceInput, ImportWebSearchInput, ImportWebsiteInput, ImportYoutubeInput, ListSourcesQuery } from "../validators/source.validator.js";
+import { CreateSourceInput, ImportWebSearchInput, ImportWebsiteInput, ImportYoutubeInput, ListSourcesQuery, ReprocessSourcesInput } from "../validators/source.validator.js";
 import { getWorkspaceByIdForUser } from "./workspace.service.js";
 
 // Web, PDF & YT
@@ -8,6 +8,9 @@ import { uploadPdfToCloudinary } from "../lib/cloudinary.js";
 import { extractPdfFromBuffer } from "../lib/pdf.js";
 import { scrapeWebsite } from "../lib/firecrawl.js";
 import { fetchYoutubeTranscript } from "../lib/youtube.js";
+import { enqueueSourceProcessing } from "../lib/source-events.js";
+import { listChunksForSource, removeSourceFromIndex } from "./source-processing.service.js";
+import { Prisma } from "../generated/prisma/client.js";
 
 /**
  * Persists a source row and enqueues the Inngest processing pipeline.
@@ -21,10 +24,10 @@ async function createAndProcessSource(
 ) {
     const source = await createSourceRecord(data);
 
-    // await enqueueSourceProcessing({
-    //     sourceId: source.id,
-    //     workspaceId: source.workspaceId,
-    // });
+    await enqueueSourceProcessing({
+        sourceId: source.id,
+        workspaceId: source.workspaceId,
+    });
 
     return source;
 }
@@ -115,7 +118,7 @@ export async function deleteSourceForWorkspace(
     userId: string,
 ) {
     await getSourceForWorkspace(workspaceId, sourceId, userId);
-    // await removeSourceFromIndex(workspaceId, sourceId);
+    await removeSourceFromIndex(workspaceId, sourceId);
     await deleteSourceRecord(sourceId);
 }
 
@@ -288,4 +291,94 @@ export async function importWebSearchSource(
             sourceUrl: input.url,
         },
     });
+}
+
+/**
+ * Returns indexed chunks for a source (debugging / admin UI).
+ *
+ * @param workspaceId - Workspace the source belongs to
+ * @param sourceId - Source whose chunks to list
+ * @param userId - Authenticated user's id
+ * @returns Chunk rows and total count
+ *
+ */
+export async function getSourceChunksForWorkspace(
+    workspaceId: string,
+    sourceId: string,
+    userId: string,
+) {
+    await getSourceForWorkspace(workspaceId, sourceId, userId);
+    return listChunksForSource(sourceId);
+}
+
+
+/**
+ * Re-queues failed sources for re-processing.
+ *
+ * When `sourceIds` is omitted, all `FAILED` sources in the workspace are reprocessed.
+ * When provided, only failed sources whose id is in the list are reprocessed.
+ *
+ * @param workspaceId - Workspace containing the sources
+ * @param userId - Authenticated user's id
+ * @param input - Optional subset of source ids to reprocess
+ * @returns Count of sources that were requeued
+ *
+ *
+ */
+export async function reprocessSourcesForWorkspace(
+    workspaceId: string,
+    userId: string,
+    input: ReprocessSourcesInput = {},
+) {
+    await getWorkspaceByIdForUser(workspaceId, userId);
+
+    const sources = await findSourcesByWorkspaceId(workspaceId, {
+        status: "FAILED",
+    });
+
+    const targets = input.sourceIds?.length
+        ? sources.filter((source) => input.sourceIds?.includes(source.id))
+        : sources;
+
+    for (const source of targets) {
+        await reprocessSourceForWorkspace(workspaceId, source.id, userId);
+    }
+
+    return { reprocessed: targets.length };
+}
+
+/**
+ * Clears vectors/chunks and re-queues a single source for full re-indexing.
+ *
+ * @param workspaceId - Workspace the source belongs to
+ * @param sourceId - Source to reprocess
+ * @param userId - Authenticated user's id
+ * @returns Resolves when the source is reset to `PENDING` and re-enqueued
+ * @throws {NotFoundError} When the source is not found
+ *
+ */
+export async function reprocessSourceForWorkspace(
+    workspaceId: string,
+    sourceId: string,
+    userId: string,
+) {
+    const source = await getSourceForWorkspace(workspaceId, sourceId, userId);
+
+    await removeSourceFromIndex(workspaceId, sourceId);
+
+    const metadata =
+        source.metadata &&
+            typeof source.metadata === "object" &&
+            !Array.isArray(source.metadata)
+            ? { ...(source.metadata as Record<string, unknown>) }
+            : {};
+
+    delete metadata.processingError;
+
+    await updateSourceRecord(sourceId, {
+        status: "PENDING",
+        metadata: metadata as Prisma.InputJsonValue,
+    });
+
+    await enqueueSourceProcessing({ sourceId, workspaceId });
 }
