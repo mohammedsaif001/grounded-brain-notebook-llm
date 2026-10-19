@@ -1,10 +1,12 @@
 {
   "name": "grounded-brain-notebook-llm",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Grounded Brain - A Notebook LLM Clone / Gemini Notebook",
+  "main": "dist/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
   },
   "repository": {
     "type": "git",
@@ -17,5 +19,17 @@
   "bugs": {
     "url": "https://github.com/mohammedsaif001/grounded-brain-notebook-llm/issues"
   },
-  "homepage": "https://github.com/mohammedsaif001/grounded-brain-notebook-llm#readme"
+  "homepage": "https://github.com/mohammedsaif001/grounded-brain-notebook-llm#readme",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.3.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.19.2",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  }
 }
