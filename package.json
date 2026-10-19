@@ -4,7 +4,7 @@
   "description": "Grounded Brain - A Notebook LLM Clone / Gemini Notebook",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "prisma generate && tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js"
   },
@@ -21,14 +21,19 @@
   },
   "homepage": "https://github.com/mohammedsaif001/grounded-brain-notebook-llm#readme",
   "dependencies": {
+    "@prisma/adapter-pg": "^7.10.1",
+    "@prisma/client": "^7.10.1",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
-    "express": "^5.3.0"
+    "express": "^5.3.0",
+    "pg": "^8.23.1"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^24.19.2",
+    "@types/pg": "^8.23.1",
+    "prisma": "^7.10.1",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3"
   }
