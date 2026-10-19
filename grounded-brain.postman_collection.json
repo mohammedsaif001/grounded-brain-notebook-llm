@@ -1,6 +1,6 @@
 {
   "info": {
-    "name": "Chaibook server (course)",
+    "name": "Grounded Brain Notebook LLM",
     "description": "Import this collection. Variables are on the collection (Variables tab). Postman keeps cookies automatically, so sign in with Chapter 04 first. IDs are saved into variables by the test scripts of the create requests.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
