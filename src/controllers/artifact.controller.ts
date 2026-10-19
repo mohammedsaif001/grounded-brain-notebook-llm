@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { APIResponse } from "../utils/api-response.js";
 import {
     createArtifactForWorkspace,
     deleteArtifactForWorkspace,
@@ -17,7 +18,7 @@ export async function listArtifacts(req: Request, res: Response) {
         workspaceId,
         req.session.user.id,
     );
-    res.json(artifacts);
+    APIResponse.Ok(res, artifacts);
 }
 
 export async function getArtifact(req: Request, res: Response) {
@@ -27,7 +28,7 @@ export async function getArtifact(req: Request, res: Response) {
         artifactId,
         req.session.user.id,
     );
-    res.json(artifact);
+    APIResponse.Ok(res, artifact);
 }
 
 export async function createArtifact(req: Request, res: Response) {
@@ -38,7 +39,7 @@ export async function createArtifact(req: Request, res: Response) {
         req.session.user.id,
         input,
     );
-    res.status(201).json(artifact);
+    APIResponse.Created(res, artifact);
 }
 
 export async function deleteArtifact(req: Request, res: Response) {
@@ -48,5 +49,5 @@ export async function deleteArtifact(req: Request, res: Response) {
         artifactId,
         req.session.user.id,
     );
-    res.status(204).send();
+    APIResponse.NoContent(res);
 }

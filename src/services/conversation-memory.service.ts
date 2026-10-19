@@ -7,7 +7,7 @@ import {
     updateConversationSummary,
 } from "../repositories/conversation.repository.js";
 import { findMessagesByConversationId } from "../repositories/message.repository.js";
-import { NotFoundError } from "../types/app-error.js";
+import { APIError } from "../utils/api-error.js";
 
 /** Upper bound on messages sent to Mem0 for extraction in one summary run. */
 const MAX_MEMORY_EXTRACTION_MESSAGES = 16;
@@ -23,7 +23,7 @@ const MAX_MEMORY_EXTRACTION_MESSAGES = 16;
  * @param conversationId - Conversation to summarize
  * @param userId - Owner of the conversation (used for Mem0)
  * @returns Updated conversation with `summary` and `summaryMessageCount`
- * @throws {NotFoundError} When the conversation does not exist
+ * @throws {APIError} NotFound when the conversation does not exist
  *
  *
  */
@@ -34,7 +34,7 @@ export async function summarizeConversationById(
     const conversation = await findConversationById(conversationId);
 
     if (!conversation) {
-        throw new NotFoundError("Conversation not found");
+        throw APIError.NotFound("Conversation not found");
     }
 
     const messages = await findMessagesByConversationId(conversationId);

@@ -1,8 +1,9 @@
 import type { Request, Response } from "express";
+import { APIResponse } from "../utils/api-response.js";
 
 import { bulkDeleteSourcesSchema, createSourceSchema, importWebSearchSchema, importWebsiteSchema, importYoutubeSchema, listSourcesQuerySchema, reprocessSourcesSchema, sourceIdParamSchema, workspaceIdParamSchema } from "../validators/source.validator.js";
 import { bulkDeleteSourcesForWorkspace, createTextOrMarkdownSource, deleteSourceForWorkspace, getSourceChunksForWorkspace, getSourceForWorkspace, importWebSearchSource, importWebsiteSource, importYoutubeSource, listSourcesForWorkspace, reprocessSourceForWorkspace, reprocessSourcesForWorkspace, uploadPdfSource } from "../services/source.service.js";
-import { ValidationError } from "../types/app-error.js";
+import { APIError } from "../utils/api-error.js";
 
 export async function listSources(req: Request, res: Response) {
     const { workspaceId } = workspaceIdParamSchema.parse(req.params);
@@ -12,7 +13,7 @@ export async function listSources(req: Request, res: Response) {
         req.session.user.id,
         filters,
     );
-    res.json(sources);
+    APIResponse.Ok(res, sources);
 }
 
 export async function getSource(req: Request, res: Response) {
@@ -22,7 +23,7 @@ export async function getSource(req: Request, res: Response) {
         sourceId,
         req.session.user.id,
     );
-    res.json(source);
+    APIResponse.Ok(res, source);
 }
 
 export async function createSource(req: Request, res: Response) {
@@ -33,7 +34,7 @@ export async function createSource(req: Request, res: Response) {
         req.session.user.id,
         input,
     );
-    res.status(201).json(source);
+    APIResponse.Created(res, source);
 }
 
 export async function deleteSource(req: Request, res: Response) {
@@ -43,7 +44,7 @@ export async function deleteSource(req: Request, res: Response) {
         sourceId,
         req.session.user.id,
     );
-    res.status(204).send();
+    APIResponse.NoContent(res);
 }
 export async function bulkDeleteSources(req: Request, res: Response) {
     const { workspaceId } = workspaceIdParamSchema.parse(req.params);
@@ -53,14 +54,14 @@ export async function bulkDeleteSources(req: Request, res: Response) {
         req.session.user.id,
         input.sourceIds,
     );
-    res.status(204).send();
+    APIResponse.NoContent(res);
 }
 
 export async function uploadPdf(req: Request, res: Response) {
     const { workspaceId } = workspaceIdParamSchema.parse(req.params);
 
     if (!req.file) {
-        throw new ValidationError("PDF file is required");
+        throw APIError.BadRequest("PDF file is required");
     }
 
     const title =
@@ -73,7 +74,7 @@ export async function uploadPdf(req: Request, res: Response) {
         title,
     );
 
-    res.status(201).json(source);
+    APIResponse.Created(res, source);
 }
 
 export async function importWebsite(req: Request, res: Response) {
@@ -84,7 +85,7 @@ export async function importWebsite(req: Request, res: Response) {
         req.session.user.id,
         input,
     );
-    res.status(201).json(source);
+    APIResponse.Created(res, source);
 }
 
 export async function importYoutube(req: Request, res: Response) {
@@ -95,7 +96,7 @@ export async function importYoutube(req: Request, res: Response) {
         req.session.user.id,
         input,
     );
-    res.status(201).json(source);
+    APIResponse.Created(res, source);
 }
 
 export async function importWebSearch(req: Request, res: Response) {
@@ -106,7 +107,7 @@ export async function importWebSearch(req: Request, res: Response) {
         req.session.user.id,
         input,
     );
-    res.status(201).json(source);
+    APIResponse.Created(res, source);
 }
 
 
@@ -117,7 +118,7 @@ export async function getSourceChunks(req: Request, res: Response) {
         sourceId,
         req.session.user.id,
     );
-    res.json(result);
+    APIResponse.Ok(res, result);
 }
 
 
@@ -129,7 +130,7 @@ export async function reprocessSources(req: Request, res: Response) {
         req.session.user.id,
         input,
     );
-    res.json(result);
+    APIResponse.Ok(res, result);
 }
 
 export async function reprocessSource(req: Request, res: Response) {
@@ -139,5 +140,5 @@ export async function reprocessSource(req: Request, res: Response) {
         sourceId,
         req.session.user.id,
     );
-    res.status(202).json({ reprocessed: true });
+    APIResponse.Accepted(res, { reprocessed: true });
 }

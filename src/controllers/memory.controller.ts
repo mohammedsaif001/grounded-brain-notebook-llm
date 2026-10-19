@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { APIResponse } from "../utils/api-response.js";
 import {
     createMemoryForUser,
     deleteMemoryForUser,
@@ -13,13 +14,13 @@ import {
 
 export async function listMemories(req: Request, res: Response) {
     const memories = await listUserMemories(req.session.user.id);
-    res.json(memories);
+    APIResponse.Ok(res, memories);
 }
 
 export async function createMemory(req: Request, res: Response) {
     const input = createMemorySchema.parse(req.body);
     const memory = await createMemoryForUser(req.session.user.id, input);
-    res.status(201).json(memory);
+    APIResponse.Created(res, memory);
 }
 
 export async function updateMemory(req: Request, res: Response) {
@@ -30,11 +31,11 @@ export async function updateMemory(req: Request, res: Response) {
         memoryId,
         input,
     );
-    res.json(memory);
+    APIResponse.Ok(res, memory);
 }
 
 export async function deleteMemory(req: Request, res: Response) {
     const { memoryId } = memoryIdParamSchema.parse(req.params);
     await deleteMemoryForUser(req.session.user.id, memoryId);
-    res.status(204).send();
+    APIResponse.NoContent(res);
 }

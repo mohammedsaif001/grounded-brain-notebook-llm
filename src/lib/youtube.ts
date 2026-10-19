@@ -3,14 +3,14 @@
  */
 
 import { YoutubeTranscript } from "youtube-transcript";
-import { ValidationError } from "../types/app-error.js";
+import { APIError } from "../utils/api-error.js";
 
 /**
  * Fetches caption transcript text for a YouTube video.
  *
  * @param url - YouTube page URL
  * @returns Video id and concatenated transcript text
- * @throws {ValidationError} When the URL is invalid, captions are missing, or fetch fails
+ * @throws {APIError} BadRequest when the URL is invalid, captions are missing, or fetch fails
  *
  *
  */
@@ -21,7 +21,7 @@ export async function fetchYoutubeTranscript(url: string) {
         )?.[1] ?? url.match(/youtube\.com\/shorts\/([\w-]{11})/)?.[1];
 
     if (!videoId) {
-        throw new ValidationError("Enter a valid YouTube URL");
+        throw APIError.BadRequest("Enter a valid YouTube URL");
     }
 
     try {
@@ -29,14 +29,17 @@ export async function fetchYoutubeTranscript(url: string) {
         const content = segments.map((segment) => segment.text).join(" ").trim();
 
         if (!content) {
-            throw new ValidationError(
+            throw APIError.BadRequest(
                 "No transcript found for this video",
             );
         }
 
         return { videoId, content };
-    } catch {
-        throw new ValidationError(
+    } catch (error) {
+        if (error instanceof APIError) {
+            throw error;
+        }
+        throw APIError.BadRequest(
             "Could not fetch transcript. The video may not have captions.",
         );
     }

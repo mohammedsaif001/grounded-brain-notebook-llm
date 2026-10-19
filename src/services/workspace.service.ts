@@ -5,7 +5,7 @@ import {
 } from "../repositories/workspace.repository.js";
 
 import * as workspaceRepository from "../repositories/workspace.repository.js";
-import { NotFoundError } from "../types/app-error.js";
+import { APIError } from "../utils/api-error.js";
 import type {
     CreateWorkspaceInput,
     UpdateWorkspaceInput,
@@ -43,7 +43,7 @@ export async function createWorkspaceForUser(
  * @param workspaceId - Workspace to fetch
  * @param userId - Authenticated user's id
  * @returns The workspace record
- * @throws {NotFoundError} When the workspace does not exist or belongs to another user
+ * @throws {APIError} NotFound when the workspace does not exist or belongs to another user
  *
  *
  */
@@ -54,7 +54,7 @@ export async function getWorkspaceByIdForUser(
     const workspace = await workspaceRepository.findWorkspaceByIdAndUserId(workspaceId, userId);
 
     if (!workspace) {
-        throw new NotFoundError("Workspace not found");
+        throw APIError.NotFound("Workspace not found");
     }
 
     return workspace;
@@ -67,7 +67,7 @@ export async function getWorkspaceByIdForUser(
  * @param userId - Authenticated user's id
  * @param input - Partial workspace fields to change
  * @returns Updated workspace record
- * @throws {NotFoundError} When the workspace is not found for this user
+ * @throws {APIError} NotFound when the workspace is not found for this user
  *
  */
 export async function updateWorkspaceForUser(
@@ -87,7 +87,7 @@ export async function updateWorkspaceForUser(
  * @param workspaceId - Workspace to delete
  * @param userId - Authenticated user's id
  * @returns Resolves when the workspace row is deleted
- * @throws {NotFoundError} When the workspace is not found for this user
+ * @throws {APIError} NotFound when the workspace is not found for this user
  *
  */
 export async function deleteWorkspaceForUser(

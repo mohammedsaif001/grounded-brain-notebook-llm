@@ -11,7 +11,7 @@ import {
     findSourcesWithContentByWorkspaceId,
 } from "../repositories/source.repository.js";
 import type { ArtifactRecord } from "../repositories/artifact.repository.js";
-import { ValidationError } from "../types/app-error.js";
+import { APIError } from "../utils/api-error.js";
 
 /** Characters reserved for per-source headers and separators in the combined context. */
 const CONTEXT_OVERHEAD_CHARS = 2_000;
@@ -86,7 +86,7 @@ const reportSchema = z.object({
  * @param workspaceId - Workspace whose sources to check
  * @param sourceIds - Optional subset of source ids; defaults to all READY sources
  * @returns Ids of the READY sources that will be used
- * @throws {ValidationError} When no ready sources match
+ * @throws {APIError} BadRequest when no ready sources match
  *
  */
 export async function resolveReadySourceIds(
@@ -102,7 +102,7 @@ export async function resolveReadySourceIds(
         : sources;
 
     if (selected.length === 0) {
-        throw new ValidationError(
+        throw APIError.BadRequest(
             "No ready sources found. Add and process sources before generating learning tools.",
         );
     }
@@ -197,7 +197,7 @@ async function condenseSource(title: string, content: string, budget: number) {
  * @param workspaceId - Workspace whose sources to read
  * @param sourceIds - Optional subset of source ids; defaults to all READY sources
  * @returns Combined source text and the ids actually used
- * @throws {ValidationError} When no ready sources exist or none have extracted content
+ * @throws {APIError} BadRequest when no ready sources exist or none have extracted content
  *
  *
  *
@@ -215,7 +215,7 @@ export async function gatherSourceContext(
         : sources;
 
     if (selected.length === 0) {
-        throw new ValidationError(
+        throw APIError.BadRequest(
             "No ready sources found. Add and process sources before generating learning tools.",
         );
     }
@@ -226,7 +226,7 @@ export async function gatherSourceContext(
     });
 
     if (withContent.length === 0) {
-        throw new ValidationError(
+        throw APIError.BadRequest(
             "Selected sources have no extracted content yet.",
         );
     }
@@ -314,7 +314,7 @@ function sanitizeMindmap(mindmap: z.infer<typeof mindmapSchema>) {
  * @param type - Artifact type (`SUMMARY`, `QUIZ`, `FLASHCARDS`, etc.)
  * @param sourceText - Combined source material from {@link gatherSourceContext}
  * @returns Type-specific JSON content stored on the artifact row
- * @throws {ValidationError} When the artifact type is unsupported
+ * @throws {APIError} BadRequest when the artifact type is unsupported
  *
  *
  *
@@ -385,6 +385,6 @@ export async function generateArtifactContent(
             return result.output;
         }
         default:
-            throw new ValidationError(`Unsupported artifact type: ${type}`);
+            throw APIError.BadRequest(`Unsupported artifact type: ${type}`);
     }
 }

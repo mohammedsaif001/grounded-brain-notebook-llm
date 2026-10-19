@@ -1,40 +1,39 @@
 import type { NextFunction, Request, Response } from "express";
 import { flattenError, ZodError } from "zod";
-import { AppError } from "../types/app-error.js";
 import multer from "multer";
+import { APIError } from "../utils/api-error.js";
+import { APIResponse } from "../utils/api-response.js";
 
-export function errorHandler(
-    error: unknown,
-    _req: Request,
-    res: Response,
-    _next: NextFunction,
-) {
-    if (error instanceof AppError) {
-        return res.status(error.statuscode).json({
-        error: error.message,
-        details: error.details,
-    });
-  }
+/**
+ * Converts any thrown value into an {@link APIError}.
+ *
+ * Unknown errors are logged and reported as a generic 500 so internals never leak.
+ */
+function toAPIError(error: unknown): APIError {
+    if (error instanceof APIError) {
+        return error;
+    }
 
     if (error instanceof ZodError) {
-        res.status(400).json({
-            error: "Validation failed",
-            details: flattenError(error).fieldErrors,
-        });
-        return;
+        return APIError.Validation(
+            "Validation failed",
+            flattenError(error).fieldErrors,
+        );
     }
 
     if (error instanceof multer.MulterError) {
-        res.status(400).json({ error: error.message });
-        return;
+        return error.code === "LIMIT_FILE_SIZE"
+            ? APIError.PayloadTooLarge(error.message)
+            : APIError.BadRequest(error.message);
     }
 
-    if (
-        error instanceof Error &&
-        error.message === "Only PDF files are allowed"
-    ) {
-        res.status(400).json({ error: error.message });
-        return;
+    // Errors raised by express.json() (body-parser).
+    const bodyParserType = (error as { type?: string } | null)?.type;
+    if (bodyParserType === "entity.too.large") {
+        return APIError.PayloadTooLarge("Request body is too large");
+    }
+    if (bodyParserType === "entity.parse.failed") {
+        return APIError.BadRequest("Request body is not valid JSON");
     }
 
     const cloudinaryError = error as Error & {
@@ -45,12 +44,31 @@ export function errorHandler(
         cloudinaryError.name === "UnexpectedResponse" &&
         cloudinaryError.http_code === 403
     ) {
-        res.status(400).json({
-            error:
-                "Cloudinary upload rejected: your API key is missing Upload (create) permission. In Cloudinary Dashboard → Settings → API Keys, use the root secret or create a key with Upload enabled.",
-        });
+        return APIError.BadRequest(
+            "Cloudinary upload rejected: your API key is missing Upload (create) permission. In Cloudinary Dashboard → Settings → API Keys, use the root secret or create a key with Upload enabled.",
+        );
+    }
+
+    console.error(error);
+    return APIError.Internal();
+}
+
+export function errorHandler(
+    error: unknown,
+    _req: Request,
+    res: Response,
+    next: NextFunction,
+) {
+    // A streaming response (e.g. chat) has already started; let Express close the connection.
+    if (res.headersSent) {
+        next(error);
         return;
     }
-    console.error(error);
-    res.status(500).json({ error: "Internal server error" });
+
+    APIResponse.Error(res, toAPIError(error));
+}
+
+/** Catch-all for unmatched routes; register after all routes, before {@link errorHandler}. */
+export function notFoundHandler(req: Request) {
+    throw APIError.NotFound(`Route ${req.method} ${req.path} not found`);
 }

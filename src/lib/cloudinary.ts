@@ -1,7 +1,7 @@
 
 import { v2 as cloudinary } from "cloudinary";
 import { env } from "../config/env.js";
-import { ValidationError } from "../types/app-error.js";
+import { APIError } from "../utils/api-error.js";
 
 const cloudName = env.CLOUDINARY_CLOUD_NAME;
 const uploadPreset = env.CLOUDINARY_UPLOAD_PRESET;
@@ -54,7 +54,7 @@ export function getSignedCloudinaryDownloadUrl(
  * @param buffer - PDF file bytes from Multer
  * @param filename - Original filename (used in the multipart form)
  * @returns Upload metadata including secure URL and public id
- * @throws {ValidationError} When Cloudinary is not configured or upload is rejected
+ * @throws {APIError} ServiceUnavailable when Cloudinary is not configured; BadRequest when the upload is rejected
  *
  */
 export async function uploadPdfToCloudinary(
@@ -62,7 +62,7 @@ export async function uploadPdfToCloudinary(
     filename: string,
 ): Promise<CloudinaryUploadResult> {
     if (!cloudName || !uploadPreset) {
-        throw new ValidationError("Cloudinary is not configured on the server");
+        throw APIError.ServiceUnavailable("Cloudinary is not configured on the server");
     }
 
     const form = new FormData();
@@ -87,12 +87,12 @@ export async function uploadPdfToCloudinary(
             `Cloudinary upload failed (${response.status})`;
 
         if (response.status === 403) {
-            throw new ValidationError(
+            throw APIError.BadRequest(
                 "Cloudinary rejected the upload. Check CLOUDINARY_UPLOAD_PRESET in server/.env matches an unsigned preset in your dashboard.",
             );
         }
 
-        throw new ValidationError(message);
+        throw APIError.BadRequest(message);
     }
 
     return {

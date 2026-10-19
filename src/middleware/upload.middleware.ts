@@ -1,4 +1,5 @@
 import multer from 'multer';
+import { APIError } from '../utils/api-error.js';
 
 const MAX_PDF_SIZE_BYTES = 10 * 1024 * 1024;
 
@@ -19,7 +20,7 @@ export const pdfUpload = multer({
             return;
         }
 
-        cb(new Error("Only PDF files are allowed"));
+        cb(APIError.BadRequest("Only PDF files are allowed"));
     },
 })
 

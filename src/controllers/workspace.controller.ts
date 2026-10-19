@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { APIResponse } from "../utils/api-response.js";
 import * as workspaceService from "../services/workspace.service.js";
 import {
     createWorkspaceSchema,
@@ -8,7 +9,7 @@ import {
 
 export async function listWorkspaces(req: Request, res: Response) {
     const workspaces = await workspaceService.listWorkspacesByUser(req.session.user.id);
-    res.json(workspaces);
+    APIResponse.Ok(res, workspaces);
 }
 
 export async function getWorkspace(req: Request, res: Response) {
@@ -17,7 +18,7 @@ export async function getWorkspace(req: Request, res: Response) {
         workspaceId,
         req.session.user.id,
     );
-    res.json(workspace);
+    APIResponse.Ok(res, workspace);
 }
 
 export async function createWorkspace(req: Request, res: Response) {
@@ -26,7 +27,7 @@ export async function createWorkspace(req: Request, res: Response) {
         req.session.user.id,
         input,
     );
-    res.status(201).json(workspace);
+    APIResponse.Created(res, workspace);
 }
 
 export async function updateWorkspace(req: Request, res: Response) {
@@ -37,11 +38,11 @@ export async function updateWorkspace(req: Request, res: Response) {
         req.session.user.id,
         input,
     );
-    res.json(workspace);
+    APIResponse.Ok(res, workspace);
 }
 
 export async function deleteWorkspace(req: Request, res: Response) {
     const { workspaceId } = workspaceIdParamSchema.parse(req.params);
     await workspaceService.deleteWorkspaceForUser(workspaceId, req.session.user.id);
-    res.status(204).send();
+    APIResponse.NoContent(res);
 }

@@ -1,5 +1,5 @@
 import { createSourceRecord, deleteSourceRecord, findSourceByIdAndWorkspaceId, findSourcesByWorkspaceId, SourceRecord, updateSourceRecord } from "../repositories/source.repository.js";
-import { NotFoundError } from "../types/app-error.js";
+import { APIError } from "../utils/api-error.js";
 import { CreateSourceInput, ImportWebSearchInput, ImportWebsiteInput, ImportYoutubeInput, ListSourcesQuery, ReprocessSourcesInput } from "../validators/source.validator.js";
 import { getWorkspaceByIdForUser } from "./workspace.service.js";
 
@@ -57,7 +57,7 @@ export async function listSourcesForWorkspace(
  * @param sourceId - Source to fetch
  * @param userId - Authenticated user's id
  * @returns Source record
- * @throws {NotFoundError} When the source does not exist in this workspace
+ * @throws {APIError} NotFound when the source does not exist in this workspace
  *
  */
 export async function getSourceForWorkspace(
@@ -70,7 +70,7 @@ export async function getSourceForWorkspace(
     const source = await findSourceByIdAndWorkspaceId(sourceId, workspaceId);
 
     if (!source) {
-        throw new NotFoundError("Source not found");
+        throw APIError.NotFound("Source not found");
     }
 
     return source;
@@ -109,7 +109,7 @@ export async function createTextOrMarkdownSource(
  * @param sourceId - Source to delete
  * @param userId - Authenticated user's id
  * @returns Resolves when the source row is deleted
- * @throws {NotFoundError} When the source is not found
+ * @throws {APIError} NotFound when the source is not found
  *
  */
 export async function deleteSourceForWorkspace(
@@ -355,7 +355,7 @@ export async function reprocessSourcesForWorkspace(
  * @param sourceId - Source to reprocess
  * @param userId - Authenticated user's id
  * @returns Resolves when the source is reset to `PENDING` and re-enqueued
- * @throws {NotFoundError} When the source is not found
+ * @throws {APIError} NotFound when the source is not found
  *
  */
 export async function reprocessSourceForWorkspace(

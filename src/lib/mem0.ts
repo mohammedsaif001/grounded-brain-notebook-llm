@@ -1,5 +1,6 @@
 import { MemoryClient, MemoryNotFoundError } from "mem0ai";
 import { env } from "../config/env.js";
+import { APIError } from "../utils/api-error.js";
 import { MEMORY_SEARCH_MIN_SCORE, MEMORY_SEARCH_TOP_K } from "./ai-config.js";
 
 let client: MemoryClient | null = null;
@@ -8,13 +9,13 @@ let client: MemoryClient | null = null;
  * Returns a singleton Mem0 API client.
  *
  * @returns Configured `MemoryClient`
- * @throws When `MEM0_API_KEY` is missing
+ * @throws {APIError} ServiceUnavailable when `MEM0_API_KEY` is missing
  */
 export function getMem0Client() {
     const apiKey = env.MEM0_API_KEY;
 
     if (!apiKey) {
-        throw new Error("MEM0_API_KEY is not configured");
+        throw APIError.ServiceUnavailable("Memory is not configured on the server");
     }
 
     if (!client) {

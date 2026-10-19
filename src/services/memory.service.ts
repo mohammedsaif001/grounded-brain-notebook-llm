@@ -4,7 +4,7 @@ import {
     getUserMemory,
     updateUserMemory,
 } from "../lib/mem0.js";
-import { NotFoundError } from "../types/app-error.js";
+import { APIError } from "../utils/api-error.js";
 
 /**
  * Verifies that a memory exists and belongs to the given user.
@@ -13,14 +13,14 @@ import { NotFoundError } from "../types/app-error.js";
  *
  * @param userId - Authenticated user's id
  * @param memoryId - Mem0 memory id
- * @throws {NotFoundError} When the memory does not exist or belongs to another user
+ * @throws {APIError} NotFound when the memory does not exist or belongs to another user
  *
  */
 async function assertMemoryOwnedByUser(userId: string, memoryId: string) {
     const memory = await getUserMemory(memoryId);
 
     if (!memory || memory.userId !== userId) {
-        throw new NotFoundError("Memory not found");
+        throw APIError.NotFound("Memory not found");
     }
 }
 
@@ -30,7 +30,7 @@ async function assertMemoryOwnedByUser(userId: string, memoryId: string) {
  * @param userId - Owner of the memory
  * @param input - Raw memory text from the client
  * @returns Created Mem0 memory record
- * @throws {ValidationError} When memory text is empty after trimming
+ * @throws {APIError} BadRequest when memory text is empty after trimming
  *
  *
  */
@@ -52,7 +52,7 @@ export function createMemoryForUser(
  * @param memoryId - Mem0 memory id to update
  * @param input - New memory text
  * @returns Updated Mem0 memory record
- * @throws {NotFoundError} When the memory is missing or owned by another user
+ * @throws {APIError} NotFound when the memory is missing or owned by another user
  *
  */
 export async function updateMemoryForUser(
@@ -70,7 +70,7 @@ export async function updateMemoryForUser(
  * @param userId - Authenticated user's id
  * @param memoryId - Mem0 memory id to delete
  * @returns Resolves when deletion completes
- * @throws {NotFoundError} When the memory is missing or owned by another user
+ * @throws {APIError} NotFound when the memory is missing or owned by another user
  *
  */
 export async function deleteMemoryForUser(userId: string, memoryId: string) {

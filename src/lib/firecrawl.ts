@@ -6,20 +6,20 @@
 
 import Firecrawl from "@mendable/firecrawl-js";
 import { env } from "../config/env.js";
-import { ValidationError } from "../types/app-error.js";
+import { APIError } from "../utils/api-error.js";
 
 /**
  * Scrapes a public URL and returns clean markdown suitable for RAG indexing.
  *
  * @param url - Page URL to scrape (must be reachable by Firecrawl)
  * @returns Markdown content, optional page title, and canonical source URL
- * @throws {ValidationError} When Firecrawl is not configured or extraction fails
+ * @throws {APIError} ServiceUnavailable when Firecrawl is not configured; BadRequest when extraction fails
  */
 export async function scrapeWebsite(url: string) {
     const apiKey = env.FIRECRAWL_API_KEY;
 
     if (!apiKey) {
-        throw new ValidationError("Firecrawl is not configured on the server");
+        throw APIError.ServiceUnavailable("Firecrawl is not configured on the server");
     }
 
     const client = new Firecrawl({ apiKey });
@@ -30,7 +30,7 @@ export async function scrapeWebsite(url: string) {
     const markdown = result.markdown?.trim();
 
     if (!markdown) {
-        throw new ValidationError("Could not extract content from this URL");
+        throw APIError.BadRequest("Could not extract content from this URL");
     }
 
     return {

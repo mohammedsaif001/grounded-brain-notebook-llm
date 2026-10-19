@@ -9,7 +9,7 @@ import {
     updateArtifactRecord,
     type ArtifactRecord,
 } from "../repositories/artifact.repository.js";
-import { NotFoundError } from "../types/app-error.js";
+import { APIError } from "../utils/api-error.js";
 import {
     gatherSourceContext,
     generateArtifactContent,
@@ -41,7 +41,7 @@ export async function listArtifactsForWorkspace(
  * @param artifactId - Artifact to fetch
  * @param userId - Authenticated user's id
  * @returns Artifact record with content when status is `READY`
- * @throws {NotFoundError} When the artifact does not exist in this workspace
+ * @throws {APIError} NotFound when the artifact does not exist in this workspace
  *
  */
 export async function getArtifactForWorkspace(
@@ -57,7 +57,7 @@ export async function getArtifactForWorkspace(
     );
 
     if (!artifact) {
-        throw new NotFoundError("Artifact not found");
+        throw APIError.NotFound("Artifact not found");
     }
 
     return artifact;
@@ -73,7 +73,7 @@ export async function getArtifactForWorkspace(
  * @param userId - Authenticated user's id
  * @param input - Artifact type, optional title, optional source id filter
  * @returns New artifact with status `PENDING`
- * @throws {ValidationError} When no ready sources are available
+ * @throws {APIError} BadRequest when no ready sources are available
  *
  */
 export async function createArtifactForWorkspace(
@@ -120,7 +120,7 @@ export async function createArtifactForWorkspace(
  * @param artifactId - Artifact to delete
  * @param userId - Authenticated user's id
  * @returns Resolves when the artifact row is deleted
- * @throws {NotFoundError} When the artifact is not found
+ * @throws {APIError} NotFound when the artifact is not found
  *
  */
 export async function deleteArtifactForWorkspace(

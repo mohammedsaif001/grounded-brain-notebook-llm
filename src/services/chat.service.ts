@@ -59,7 +59,7 @@ import {
     findRecentMessagesByConversationId,
 } from "../repositories/message.repository.js";
 
-import { NotFoundError, ValidationError } from "../types/app-error.js";
+import { APIError } from "../utils/api-error.js";
 import {
     buildConversationTitle,
     getLastUserMessageText,
@@ -118,7 +118,7 @@ export async function createConversationForWorkspace(
  * @param conversationId - Conversation to load messages for
  * @param userId - Authenticated user's id
  * @returns Message rows with role, content, citations, and timestamps
- * @throws {NotFoundError} When the conversation does not exist in this workspace
+ * @throws {APIError} NotFound when the conversation does not exist in this workspace
  *
  */
 export async function getConversationMessagesForWorkspace(
@@ -134,7 +134,7 @@ export async function getConversationMessagesForWorkspace(
     );
 
     if (!conversation) {
-        throw new NotFoundError("Conversation not found");
+        throw APIError.NotFound("Conversation not found");
     }
 
     return findMessagesByConversationId(conversationId);
@@ -147,7 +147,7 @@ export async function getConversationMessagesForWorkspace(
  * @param conversationId - Conversation to delete
  * @param userId - Authenticated user's id
  * @returns Resolves when the conversation row is deleted
- * @throws {NotFoundError} When the conversation does not exist
+ * @throws {APIError} NotFound when the conversation does not exist
  *
  */
 export async function deleteConversationForWorkspace(
@@ -163,7 +163,7 @@ export async function deleteConversationForWorkspace(
     );
 
     if (!conversation) {
-        throw new NotFoundError("Conversation not found");
+        throw APIError.NotFound("Conversation not found");
     }
 
     await deleteConversationRecord(conversationId);
@@ -176,7 +176,7 @@ export async function deleteConversationForWorkspace(
  * @param conversationId - Existing id from client, or undefined for a new chat
  * @param firstMessage - User text used to auto-generate a title for new conversations
  * @returns Conversation record (existing or newly created)
- * @throws {NotFoundError} When `conversationId` is provided but not found
+ * @throws {APIError} NotFound when `conversationId` is provided but not found
  *
  *
  */
@@ -192,7 +192,7 @@ async function resolveConversation(
         );
 
         if (!existing) {
-            throw new NotFoundError("Conversation not found");
+            throw APIError.NotFound("Conversation not found");
         }
 
         return existing;
@@ -246,8 +246,8 @@ async function loadRecentTurns(conversationId: string): Promise<ConversationTurn
  * @param userId - Authenticated user's id
  * @param input - Client chat payload from `useChat`
  * @returns Writes UI message stream to `res`; sets `X-Conversation-Id` header
- * @throws {ValidationError} When no user message text is present
- * @throws {NotFoundError} When conversation or workspace is not found
+ * @throws {APIError} BadRequest when no user message text is present
+ * @throws {APIError} NotFound when conversation or workspace is not found
  *
  *
  */
@@ -271,7 +271,7 @@ export async function streamWorkspaceChat(
 
     const userText = getLastUserMessageText(input.messages);
     if (!userText) {
-        throw new ValidationError("A user message is required");
+        throw APIError.BadRequest("A user message is required");
     }
 
     const conversation = await resolveConversation(

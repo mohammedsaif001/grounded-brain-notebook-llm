@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { APIResponse } from "../utils/api-response.js";
 import type { UIMessage } from "ai";
 import {
     createConversationForWorkspace,
@@ -20,7 +21,7 @@ export async function listConversations(req: Request, res: Response) {
         workspaceId,
         req.session.user.id,
     );
-    res.json(conversations);
+    APIResponse.Ok(res, conversations);
 }
 
 export async function createConversation(req: Request, res: Response) {
@@ -31,7 +32,7 @@ export async function createConversation(req: Request, res: Response) {
         req.session.user.id,
         input.title,
     );
-    res.status(201).json(conversation);
+    APIResponse.Created(res, conversation);
 }
 
 export async function listConversationMessages(req: Request, res: Response) {
@@ -42,7 +43,7 @@ export async function listConversationMessages(req: Request, res: Response) {
         conversationId,
         req.session.user.id,
     );
-    res.json(messages);
+    APIResponse.Ok(res, messages);
 }
 
 export async function deleteConversation(req: Request, res: Response) {
@@ -53,7 +54,7 @@ export async function deleteConversation(req: Request, res: Response) {
         conversationId,
         req.session.user.id,
     );
-    res.status(204).send();
+    APIResponse.NoContent(res);
 }
 
 export async function streamChat(req: Request, res: Response) {
