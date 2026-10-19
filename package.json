@@ -1,0 +1,21 @@
+{
+  "name": "grounded-brain-notebook-llm",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mohammedsaif001/grounded-brain-notebook-llm.git"
+  },
+  "keywords": [],
+  "author": "Mohammed Saif",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/mohammedsaif001/grounded-brain-notebook-llm/issues"
+  },
+  "homepage": "https://github.com/mohammedsaif001/grounded-brain-notebook-llm#readme"
+}
