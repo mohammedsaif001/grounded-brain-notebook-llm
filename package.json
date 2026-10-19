@@ -21,10 +21,12 @@
   },
   "homepage": "https://github.com/mohammedsaif001/grounded-brain-notebook-llm#readme",
   "dependencies": {
+    "@ai-sdk/openai": "^4.0.96",
     "@mendable/firecrawl-js": "^4.49.1",
     "@pinecone-database/pinecone": "^8.2.0",
     "@prisma/adapter-pg": "^7.10.1",
     "@prisma/client": "^7.10.1",
+    "ai": "^7.0.143",
     "better-auth": "^1.7.11",
     "cloudinary": "^2.11.0",
     "cors": "^2.8.6",
