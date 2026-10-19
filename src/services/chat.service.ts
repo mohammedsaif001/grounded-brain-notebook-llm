@@ -188,3 +188,123 @@ async function resolveConversation(
     );
 }
 
+/**
+ * Main RAG chat endpoint: streams an AI reply with workspace context and optional web search.
+ *
+ * **Pipeline:**
+ * 1. Validate user message and resolve/create conversation
+ * 2. Save user message to Postgres
+ * 3. Parallel: Pinecone RAG retrieval + Mem0 memory search
+ * 4. Build system prompt and stream model response via AI SDK
+ * 5. On finish: save assistant message, citations, title, summary job, Mem0 learning
+ *
+ * @param res - Express response (streamed via `pipeUIMessageStreamToResponse`)
+ * @param workspaceId - Workspace whose sources to search
+ * @param userId - Authenticated user's id
+ * @param input - Client chat payload from `useChat`
+ * @returns Writes UI message stream to `res`; sets `X-Conversation-Id` header
+ * @throws {ValidationError} When no user message text is present
+ * @throws {NotFoundError} When conversation or workspace is not found
+ *
+ *
+ */
+export async function streamWorkspaceChat(
+    res: Response,
+    workspaceId: string,
+    userId: string,
+    input: {
+        conversationId?: string;
+        messages: UIMessage[];
+        model?: string;
+        webSearch?: boolean;
+    },
+) {
+    const workspace = await getWorkspaceByIdForUser(workspaceId, userId);
+    const requestedModel = input.model ?? workspace.defaultModel;
+    const chatModel =
+        CHAT_MODELS.find((model) => model === requestedModel) ?? CHAT_MODEL;
+
+    const userText = getLastUserMessageText(input.messages);
+    if (!userText) {
+        throw new ValidationError("A user message is required");
+    }
+
+    const conversation = await resolveConversation(
+        workspaceId,
+        input.conversationId,
+        userText,
+    );
+
+    await createMessageRecord({
+        conversationId: conversation.id,
+        role: "USER",
+        content: userText,
+    });
+
+    const retrievedChunks = await retrieveWorkspaceContext(workspaceId, userText);
+
+    const citations = retrievedChunks.map((chunk) => ({
+        sourceId: chunk.sourceId,
+        sourceTitle: chunk.sourceTitle,
+        sourceType: chunk.sourceType,
+        chunkId: chunk.chunkId,
+        chunkIndex: chunk.chunkIndex,
+        page: chunk.page,
+        excerpt: chunk.text.slice(0, 280),
+        score: chunk.score,
+    }));
+
+    const systemPrompt = buildChatSystemPrompt({
+        chunks: retrievedChunks,
+        conversationSummary: conversation.summary,
+    });
+
+    const contextMessages =
+        conversation.summary && input.messages.length > RECENT_MESSAGE_WINDOW
+            ? input.messages.slice(-RECENT_MESSAGE_WINDOW)
+            : input.messages;
+
+    const stream = createUIMessageStream({
+        originalMessages: input.messages,
+        execute: async ({ writer }) => {
+            const result = streamText({
+                model: openai(chatModel),
+                system: systemPrompt,
+                messages: await convertToModelMessages(contextMessages),
+            });
+
+            writer.merge(toUIMessageStream({ stream: result.stream }));
+        },
+        onFinish: async ({ responseMessage, isAborted }) => {
+            if (isAborted) {
+                return;
+            }
+
+            const assistantText = getTextFromUIMessage(responseMessage).trim();
+            if (!assistantText) {
+                return;
+            }
+
+            await createMessageRecord({
+                conversationId: conversation.id,
+                role: "ASSISTANT",
+                content: assistantText,
+                citations,
+            });
+
+            await touchConversation(conversation.id);
+
+            if (!conversation.title) {
+                await updateConversationRecord(conversation.id, {
+                    title: buildConversationTitle(userText),
+                });
+            }
+        },
+    });
+
+    await pipeUIMessageStreamToResponse({
+        response: res,
+        stream,
+        headers: { "X-Conversation-Id": conversation.id },
+    });
+}
