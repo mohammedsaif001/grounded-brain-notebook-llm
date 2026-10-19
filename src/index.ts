@@ -3,6 +3,8 @@ import cors from 'cors'
 import express from 'express'
 import { errorHandler } from './middleware/error-handler.middleware.js';
 import { registerRoutes } from './routes/index.js';
+import { toNodeHandler } from "better-auth/node";
+import { auth } from "./lib/auth.js";
 
 const app = express();
 const port = process.env.PORT ?? 8080;
@@ -12,6 +14,8 @@ app.use(cors({
     origin: clientUrl,
     credentials: true
 }))
+
+app.all("/api/auth/{*any}", toNodeHandler(auth));
 app.use(express.json());
 
 app.get("/", (_req, res) => {
