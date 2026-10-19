@@ -34,7 +34,7 @@ import {
     RECENT_MESSAGE_WINDOW,
 } from "../../config/ai.config.js";
 import { ChatPrompt } from "./chat-prompt.js";
-import { openai } from "../../config/openai.js";
+import { isOpenAIRateLimitError, openai } from "../../config/openai.js";
 import { TavilyClient, type TavilySearchResult } from "./web-search/tavily.js";
 import { APIError } from "../../shared/http/api-error.js";
 import { UIMessageUtils } from "./chat-message.util.js";
@@ -169,6 +169,18 @@ export class ChatService {
 
         const stream = createUIMessageStream({
             originalMessages: input.messages,
+            // Headers are already sent once streaming starts, so failures are reported in-stream.
+            // Only rate-limit messages are surfaced; anything else stays generic.
+            onError: (error) => {
+                if (error instanceof APIError && error.code === "TOO_MANY_REQUESTS") {
+                    return error.message;
+                }
+                if (isOpenAIRateLimitError(error)) {
+                    return "The AI provider is rate limiting requests. Please try again shortly.";
+                }
+                console.error("Chat stream failed:", error);
+                return "Something went wrong while generating a reply. Please try again.";
+            },
             execute: async ({ writer }) => {
                 const tools = webSearchEnabled
                     ? {

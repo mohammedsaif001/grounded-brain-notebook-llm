@@ -29,6 +29,9 @@ const envSchema = z
             .default("development"),
         PORT: z.coerce.number().int().positive().default(8080),
         CLIENT_URL: z.url().default("http://localhost:3000"),
+        // Number of reverse proxies in front of the app (load balancer, CDN). Needed so
+        // rate limiting sees the real client IP instead of the proxy's. 0 = no proxy.
+        TRUST_PROXY_HOPS: z.coerce.number().int().min(0).default(0),
 
         DATABASE_URL: z.url(),
 
@@ -38,6 +41,10 @@ const envSchema = z
         GOOGLE_CLIENT_SECRET: optionalString,
 
         OPENAI_API_KEY: z.string().trim().min(1),
+        // Outbound OpenAI throttling; tune to your account's tier limits.
+        OPENAI_MAX_CONCURRENCY: z.coerce.number().int().positive().default(4),
+        OPENAI_REQUESTS_PER_MINUTE: z.coerce.number().int().positive().default(300),
+        OPENAI_MAX_QUEUE: z.coerce.number().int().positive().default(100),
 
         PINECONE_API_KEY: z.string().trim().min(1),
         PINECONE_INDEX: z.string().trim().min(1).default("grounded-brain-notebook-llm"),

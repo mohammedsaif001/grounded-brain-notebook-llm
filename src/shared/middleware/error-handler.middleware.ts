@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { flattenError, ZodError } from "zod";
 import multer from "multer";
+import { isOpenAIRateLimitError } from "../../config/openai.js";
 import { APIError } from "../http/api-error.js";
 import { APIResponse } from "../http/api-response.js";
 
@@ -25,6 +26,12 @@ function toAPIError(error: unknown): APIError {
         return error.code === "LIMIT_FILE_SIZE"
             ? APIError.PayloadTooLarge(error.message)
             : APIError.BadRequest(error.message);
+    }
+
+    if (isOpenAIRateLimitError(error)) {
+        return APIError.TooManyRequests(
+            "The AI provider is rate limiting requests. Please try again shortly.",
+        );
     }
 
     // Errors raised by express.json() (body-parser).

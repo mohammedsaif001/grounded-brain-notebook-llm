@@ -1,8 +1,9 @@
 import { Router } from "express";
-import { ChatController } from "./chat.controller.js";
 import { asyncHandler } from "../../shared/http/async-handler.js";
+import { aiRateLimiter } from "../../shared/middleware/rate-limit.middleware.js";
+import { ChatController } from "./chat.controller.js";
 
 /** `/api/workspaces/:workspaceId/chat` */
 export const chatRouter = Router({ mergeParams: true });
 
-chatRouter.post("/", asyncHandler(ChatController.stream));
+chatRouter.post("/", aiRateLimiter, asyncHandler(ChatController.stream));

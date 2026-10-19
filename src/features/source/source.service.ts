@@ -3,6 +3,7 @@ import { EventPublisher } from "../../jobs/events.js";
 import { CloudinaryStorage } from "./ingestion/cloudinary.js";
 import { FirecrawlClient } from "./ingestion/firecrawl.js";
 import { PdfExtractor } from "./ingestion/pdf.js";
+import { PdfValidator } from "./ingestion/pdf-validator.js";
 import { YoutubeClient } from "./ingestion/youtube.js";
 import {
     SourceRepository,
@@ -88,9 +89,12 @@ export class SourceService {
     }
 
     /**
-     * Uploads a PDF to Cloudinary, extracts text best-effort, and queues processing.
+     * Validates a PDF's contents, uploads it to Cloudinary, extracts text best-effort,
+     * and queues processing.
      *
      * If upload-time extraction fails, the worker retries it from Cloudinary.
+     *
+     * @throws {APIError} BadRequest when the file isn't a real PDF or contains active content
      */
     static async uploadPdf(
         workspaceId: string,
@@ -100,7 +104,12 @@ export class SourceService {
     ) {
         await WorkspaceService.getForUser(workspaceId, userId);
 
-        const upload = await CloudinaryStorage.uploadPdf(file.buffer, file.originalname);
+        // Verify the actual bytes before storing anything: the extension and MIME type
+        // checked by multer are client-supplied and can be spoofed.
+        await PdfValidator.assertSafe(file.buffer);
+        const fileName = PdfValidator.sanitizeFilename(file.originalname);
+
+        const upload = await CloudinaryStorage.uploadPdf(file.buffer, fileName);
 
         let content: string | null = null;
         let pageCount: number | undefined;
@@ -116,7 +125,7 @@ export class SourceService {
         return this.createAndQueue({
             workspaceId,
             type: "PDF",
-            title: title?.trim() || file.originalname.replace(/\.pdf$/i, ""),
+            title: title?.trim() || fileName.replace(/\.pdf$/i, ""),
             content,
             status: "PENDING",
             metadata: {
