@@ -1,8 +1,6 @@
-import { findSourceById } from "../repositories/source.repository.js";
-import { findChunksBySourceId } from "../repositories/source-chunk.repository.js";
-import { processArtifactById } from "../services/artifact.service.js";
-import { summarizeConversationById } from "../services/conversation-memory.service.js";
-import { chunkSourceContent, embedAndIndexSource, extractSourceContent, markSourceFailed, markSourceProcessing } from "../services/source-processing.service.js";
+import { ArtifactService } from "../services/artifact.service.js";
+import { ConversationMemoryService } from "../services/conversation-memory.service.js";
+import { SourceProcessingService } from "../services/source-processing.service.js";
 import { inngest } from "./client.js";
 
 export const processSource = inngest.createFunction(
@@ -27,39 +25,24 @@ export const processSource = inngest.createFunction(
     async ({ event, step }) => {
         const { sourceId } = event.data;
 
-        await step.run("mark-processing", () => markSourceProcessing(sourceId));
+        await step.run("mark-processing", () =>
+            SourceProcessingService.markProcessing(sourceId),
+        );
 
         try {
-            // Extract + chunk run in one step so the full document text and PDF pages
-            // never pass through Inngest step state (which is size-limited).
-            const { chunkCount } = await step.run("extract-and-chunk", async () => {
-                const extracted = await extractSourceContent(sourceId);
-                const chunks = await chunkSourceContent(
-                    sourceId,
-                    extracted.text,
-                    extracted.pages,
-                );
-                return { chunkCount: chunks.length };
-            });
+            const { chunkCount } = await step.run("extract-and-chunk", () =>
+                SourceProcessingService.extractAndChunk(sourceId),
+            );
 
             await step.run("embed-and-index", async () => {
-                const source = await findSourceById(sourceId);
-                if (!source) {
-                    throw new Error("Source not found");
-                }
-
-                const chunks = await findChunksBySourceId(sourceId);
-                await embedAndIndexSource(source, chunks);
+                await SourceProcessingService.index(sourceId);
             });
 
             return { sourceId, status: "READY", chunkCount };
         } catch (error) {
-            await step.run("mark-failed", async () => {
-                const source = await findSourceById(sourceId);
-                if (source) {
-                    await markSourceFailed(sourceId, error, source.metadata);
-                }
-            });
+            await step.run("mark-failed", () =>
+                SourceProcessingService.markFailed(sourceId, error),
+            );
             throw error;
         }
     },
@@ -80,7 +63,9 @@ export const generateArtifact = inngest.createFunction(
     async ({ event, step }) => {
         const { artifactId } = event.data;
 
-        await step.run("generate", () => processArtifactById(artifactId));
+        await step.run("generate", async () => {
+            await ArtifactService.generate(artifactId);
+        });
 
         return { artifactId, status: "READY" };
     },
@@ -97,9 +82,9 @@ export const summarizeConversation = inngest.createFunction(
     async ({ event, step }) => {
         const { conversationId, userId } = event.data;
 
-        await step.run("summarize", () =>
-            summarizeConversationById(conversationId, userId),
-        );
+        await step.run("summarize", async () => {
+            await ConversationMemoryService.summarize(conversationId, userId);
+        });
 
         return { conversationId, status: "SUMMARIZED" };
     },

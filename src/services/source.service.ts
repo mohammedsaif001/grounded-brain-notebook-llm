@@ -1,385 +1,254 @@
-import { createSourceRecord, deleteSourceRecord, findSourceByIdAndWorkspaceId, findSourcesByWorkspaceId, SourceRecord, updateSourceRecord } from "../repositories/source.repository.js";
+import type { Prisma } from "../generated/prisma/client.js";
+import { EventPublisher } from "../inngest/events.js";
+import { CloudinaryClient } from "../lib/cloudinary.js";
+import { FirecrawlClient } from "../lib/firecrawl.js";
+import { PdfExtractor } from "../lib/pdf.js";
+import { YoutubeClient } from "../lib/youtube.js";
+import {
+    SourceRepository,
+    type CreateSourceData,
+    type SourceRecord,
+} from "../repositories/source.repository.js";
 import { APIError } from "../utils/api-error.js";
-import { CreateSourceInput, ImportWebSearchInput, ImportWebsiteInput, ImportYoutubeInput, ListSourcesQuery, ReprocessSourcesInput } from "../validators/source.validator.js";
-import { getWorkspaceByIdForUser } from "./workspace.service.js";
+import type {
+    CreateSourceInput,
+    ImportWebSearchInput,
+    ImportWebsiteInput,
+    ImportYoutubeInput,
+    ListSourcesQuery,
+    ReprocessSourcesInput,
+} from "../validators/source.validator.js";
+import { SourceProcessingService } from "./source-processing.service.js";
+import { WorkspaceService } from "./workspace.service.js";
 
-// Web, PDF & YT
-import { uploadPdfToCloudinary } from "../lib/cloudinary.js";
-import { extractPdfFromBuffer } from "../lib/pdf.js";
-import { scrapeWebsite } from "../lib/firecrawl.js";
-import { fetchYoutubeTranscript } from "../lib/youtube.js";
-import { emitSourceDeleted, enqueueSourceProcessing } from "../lib/source-events.js";
-import { listChunksForSource, removeSourceFromIndex } from "./source-processing.service.js";
-import { Prisma } from "../generated/prisma/client.js";
+/** Source business logic: imports, CRUD, and (re)processing requests. */
+export class SourceService {
+    /** Persists a source row and queues the processing pipeline. */
+    private static async createAndQueue(data: CreateSourceData) {
+        const source = await SourceRepository.create(data);
 
-/**
- * Persists a source row and enqueues the Inngest processing pipeline.
- *
- * @param data - Fields for the new source record
- * @returns Created source with status `PENDING`
- *
- */
-async function createAndProcessSource(
-    data: Parameters<typeof createSourceRecord>[0],
-) {
-    const source = await createSourceRecord(data);
+        await EventPublisher.sourceCreated({
+            sourceId: source.id,
+            workspaceId: source.workspaceId,
+        });
 
-    await enqueueSourceProcessing({
-        sourceId: source.id,
-        workspaceId: source.workspaceId,
-    });
-
-    return source;
-}
-
-/**
- * Lists sources in a workspace with optional search and filter query params.
- *
- * @param workspaceId - Workspace to list sources from
- * @param userId - Authenticated user's id
- * @param filters - Optional `q`, `type`, and `status` filters
- * @returns Matching source records
- *
- */
-export async function listSourcesForWorkspace(
-    workspaceId: string,
-    userId: string,
-    filters: ListSourcesQuery = {},
-) {
-    await getWorkspaceByIdForUser(workspaceId, userId);
-    return findSourcesByWorkspaceId(workspaceId, filters);
-}
-
-/**
- * Loads a single source after verifying workspace ownership.
- *
- * @param workspaceId - Workspace the source belongs to
- * @param sourceId - Source to fetch
- * @param userId - Authenticated user's id
- * @returns Source record
- * @throws {APIError} NotFound when the source does not exist in this workspace
- *
- */
-export async function getSourceForWorkspace(
-    workspaceId: string,
-    sourceId: string,
-    userId: string,
-): Promise<SourceRecord> {
-    await getWorkspaceByIdForUser(workspaceId, userId);
-
-    const source = await findSourceByIdAndWorkspaceId(sourceId, workspaceId);
-
-    if (!source) {
-        throw APIError.NotFound("Source not found");
+        return source;
     }
 
-    return source;
-}
-
-
-/**
- * Creates a plain-text or markdown source and queues it for RAG indexing.
- *
- * @param workspaceId - Workspace to attach the source to
- * @param userId - Authenticated user's id
- * @param input - Source type, title, and raw content
- * @returns New source with status `PENDING`
- *
- */
-export async function createTextOrMarkdownSource(
-    workspaceId: string,
-    userId: string,
-    input: CreateSourceInput,
-) {
-    await getWorkspaceByIdForUser(workspaceId, userId);
-
-    return createAndProcessSource({
-        workspaceId,
-        type: input.type,
-        title: input.title,
-        content: input.content,
-        status: "PENDING",
-    });
-}
-
-/**
- * Deletes a source, its Pinecone vectors, and its Postgres chunks.
- *
- * @param workspaceId - Workspace the source belongs to
- * @param sourceId - Source to delete
- * @param userId - Authenticated user's id
- * @returns Resolves when the source row is deleted
- * @throws {APIError} NotFound when the source is not found
- *
- */
-export async function deleteSourceForWorkspace(
-    workspaceId: string,
-    sourceId: string,
-    userId: string,
-) {
-    await getSourceForWorkspace(workspaceId, sourceId, userId);
-    await emitSourceDeleted({ sourceId, workspaceId });
-    await removeSourceFromIndex(workspaceId, sourceId);
-    await deleteSourceRecord(sourceId);
-}
-
-/**
- * Deletes multiple sources in sequence.
- *
- * @param workspaceId - Workspace containing the sources
- * @param userId - Authenticated user's id
- * @param sourceIds - Array of source ids to delete
- * @returns Resolves when all sources are deleted
- *
- */
-export async function bulkDeleteSourcesForWorkspace(
-    workspaceId: string,
-    userId: string,
-    sourceIds: string[],
-) {
-    await getWorkspaceByIdForUser(workspaceId, userId);
-
-    for (const sourceId of sourceIds) {
-        await deleteSourceForWorkspace(workspaceId, sourceId, userId);
-    }
-}
-
-
-/**
- * Uploads a PDF to Cloudinary, optionally extracts text, and queues processing.
- *
- * Text extraction at upload time is best-effort; Inngest retries from Cloudinary if it fails.
- *
- * @param workspaceId - Workspace to attach the source to
- * @param userId - Authenticated user's id
- * @param file - Multer file buffer from the upload endpoint
- * @param title - Optional custom title (defaults to filename without `.pdf`)
- * @returns New PDF source with Cloudinary metadata and status `PENDING`
- *
- */
-export async function uploadPdfSource(
-    workspaceId: string,
-    userId: string,
-    file: Express.Multer.File,
-    title?: string,
-) {
-    await getWorkspaceByIdForUser(workspaceId, userId);
-
-    const upload = await uploadPdfToCloudinary(
-        file.buffer,
-        file.originalname,
-    );
-
-    let content: string | null = null;
-    let pageCount: number | undefined;
-
-    try {
-        const extracted = await extractPdfFromBuffer(file.buffer);
-        content = extracted.text;
-        pageCount = extracted.pageCount;
-    } catch {
-        // Inngest will retry extraction from Cloudinary if upload-time parse fails.
+    /** Lists sources (without content) with optional `q`, `type`, and `status` filters. */
+    static async list(workspaceId: string, userId: string, filters: ListSourcesQuery = {}) {
+        await WorkspaceService.getForUser(workspaceId, userId);
+        return SourceRepository.findAllByWorkspaceId(workspaceId, filters);
     }
 
-    return createAndProcessSource({
-        workspaceId,
-        type: "PDF",
-        title: title?.trim() || file.originalname.replace(/\.pdf$/i, ""),
-        content,
-        status: "PENDING",
-        metadata: {
-            fileUrl: upload.secureUrl,
-            fileName: upload.originalFilename,
-            fileSize: upload.bytes,
-            publicId: upload.publicId,
-            resourceType: upload.resourceType,
-            pageCount,
-        },
-    });
-}
+    /**
+     * Loads a single source after verifying workspace ownership.
+     *
+     * @throws {APIError} NotFound when the source does not exist in this workspace
+     */
+    static async get(workspaceId: string, sourceId: string, userId: string): Promise<SourceRecord> {
+        await WorkspaceService.getForUser(workspaceId, userId);
 
-/**
- * Scrapes a website via Firecrawl and creates a source from the markdown content.
- *
- * @param workspaceId - Workspace to attach the source to
- * @param userId - Authenticated user's id
- * @param input - URL and optional custom title
- * @returns New WEBSITE source with scraped markdown and status `PENDING`
- *
- */
-export async function importWebsiteSource(
-    workspaceId: string,
-    userId: string,
-    input: ImportWebsiteInput,
-) {
-    await getWorkspaceByIdForUser(workspaceId, userId);
+        const source = await SourceRepository.findByIdAndWorkspaceId(sourceId, workspaceId);
 
-    const scraped = await scrapeWebsite(input.url);
+        if (!source) {
+            throw APIError.NotFound("Source not found");
+        }
 
-    return createAndProcessSource({
-        workspaceId,
-        type: "WEBSITE",
-        title: input.title || scraped.title || input.url,
-        content: scraped.markdown,
-        url: scraped.sourceUrl,
-        status: "PENDING",
-        metadata: {
-            importedFrom: scraped.sourceUrl,
-        },
-    });
-}
-
-
-/**
- * Fetches a YouTube transcript and creates a source from the caption text.
- *
- * @param workspaceId - Workspace to attach the source to
- * @param userId - Authenticated user's id
- * @param input - YouTube URL and optional custom title
- * @returns New YOUTUBE source with transcript content and status `PENDING`
- *
- */
-export async function importYoutubeSource(
-    workspaceId: string,
-    userId: string,
-    input: ImportYoutubeInput,
-) {
-    await getWorkspaceByIdForUser(workspaceId, userId);
-
-    const transcript = await fetchYoutubeTranscript(input.url);
-
-    return createAndProcessSource({
-        workspaceId,
-        type: "YOUTUBE",
-        title: input.title || `YouTube: ${transcript.videoId}`,
-        content: transcript.content,
-        url: input.url,
-        status: "PENDING",
-        metadata: {
-            videoId: transcript.videoId,
-        },
-    });
-}
-
-
-/**
- * Saves web search results (from Tavily) as a WEBSITE source for RAG indexing.
- *
- * Used when the user chooses to add a web search result to their workspace sources.
- *
- * @param workspaceId - Workspace to attach the source to
- * @param userId - Authenticated user's id
- * @param input - Title, scraped content, and source URL from search
- * @returns New WEBSITE source with status `PENDING`
- *
- */
-export async function importWebSearchSource(
-    workspaceId: string,
-    userId: string,
-    input: ImportWebSearchInput,
-) {
-    await getWorkspaceByIdForUser(workspaceId, userId);
-
-    return createAndProcessSource({
-        workspaceId,
-        type: "WEBSITE",
-        title: input.title,
-        content: input.content,
-        url: input.url,
-        status: "PENDING",
-        metadata: {
-            importedFrom: "web-search",
-            sourceUrl: input.url,
-        },
-    });
-}
-
-/**
- * Returns indexed chunks for a source (debugging / admin UI).
- *
- * @param workspaceId - Workspace the source belongs to
- * @param sourceId - Source whose chunks to list
- * @param userId - Authenticated user's id
- * @returns Chunk rows and total count
- *
- */
-export async function getSourceChunksForWorkspace(
-    workspaceId: string,
-    sourceId: string,
-    userId: string,
-) {
-    await getSourceForWorkspace(workspaceId, sourceId, userId);
-    return listChunksForSource(sourceId);
-}
-
-
-/**
- * Re-queues failed sources for re-processing.
- *
- * When `sourceIds` is omitted, all `FAILED` sources in the workspace are reprocessed.
- * When provided, only failed sources whose id is in the list are reprocessed.
- *
- * @param workspaceId - Workspace containing the sources
- * @param userId - Authenticated user's id
- * @param input - Optional subset of source ids to reprocess
- * @returns Count of sources that were requeued
- *
- *
- */
-export async function reprocessSourcesForWorkspace(
-    workspaceId: string,
-    userId: string,
-    input: ReprocessSourcesInput = {},
-) {
-    await getWorkspaceByIdForUser(workspaceId, userId);
-
-    const sources = await findSourcesByWorkspaceId(workspaceId, {
-        status: "FAILED",
-    });
-
-    const targets = input.sourceIds?.length
-        ? sources.filter((source) => input.sourceIds?.includes(source.id))
-        : sources;
-
-    for (const source of targets) {
-        await reprocessSourceForWorkspace(workspaceId, source.id, userId);
+        return source;
     }
 
-    return { reprocessed: targets.length };
-}
+    /** Creates a plain-text or markdown source and queues it for indexing. */
+    static async createText(workspaceId: string, userId: string, input: CreateSourceInput) {
+        await WorkspaceService.getForUser(workspaceId, userId);
 
-/**
- * Clears vectors/chunks and re-queues a single source for full re-indexing.
- *
- * @param workspaceId - Workspace the source belongs to
- * @param sourceId - Source to reprocess
- * @param userId - Authenticated user's id
- * @returns Resolves when the source is reset to `PENDING` and re-enqueued
- * @throws {APIError} NotFound when the source is not found
- *
- */
-export async function reprocessSourceForWorkspace(
-    workspaceId: string,
-    sourceId: string,
-    userId: string,
-) {
-    const source = await getSourceForWorkspace(workspaceId, sourceId, userId);
+        return this.createAndQueue({
+            workspaceId,
+            type: input.type,
+            title: input.title,
+            content: input.content,
+            status: "PENDING",
+        });
+    }
 
-    await removeSourceFromIndex(workspaceId, sourceId);
+    /**
+     * Uploads a PDF to Cloudinary, extracts text best-effort, and queues processing.
+     *
+     * If upload-time extraction fails, the worker retries it from Cloudinary.
+     */
+    static async uploadPdf(
+        workspaceId: string,
+        userId: string,
+        file: Express.Multer.File,
+        title?: string,
+    ) {
+        await WorkspaceService.getForUser(workspaceId, userId);
 
-    const metadata =
-        source.metadata &&
+        const upload = await CloudinaryClient.uploadPdf(file.buffer, file.originalname);
+
+        let content: string | null = null;
+        let pageCount: number | undefined;
+
+        try {
+            const extracted = await PdfExtractor.fromBuffer(file.buffer);
+            content = extracted.text;
+            pageCount = extracted.pageCount;
+        } catch {
+            // The worker will retry extraction from Cloudinary.
+        }
+
+        return this.createAndQueue({
+            workspaceId,
+            type: "PDF",
+            title: title?.trim() || file.originalname.replace(/\.pdf$/i, ""),
+            content,
+            status: "PENDING",
+            metadata: {
+                fileUrl: upload.secureUrl,
+                fileName: upload.originalFilename,
+                fileSize: upload.bytes,
+                publicId: upload.publicId,
+                resourceType: upload.resourceType,
+                pageCount,
+            },
+        });
+    }
+
+    /** Scrapes a website and creates a WEBSITE source from its markdown. */
+    static async importWebsite(workspaceId: string, userId: string, input: ImportWebsiteInput) {
+        await WorkspaceService.getForUser(workspaceId, userId);
+
+        const scraped = await FirecrawlClient.scrape(input.url);
+
+        return this.createAndQueue({
+            workspaceId,
+            type: "WEBSITE",
+            title: input.title || scraped.title || input.url,
+            content: scraped.markdown,
+            url: scraped.sourceUrl,
+            status: "PENDING",
+            metadata: {
+                importedFrom: scraped.sourceUrl,
+            },
+        });
+    }
+
+    /** Fetches a YouTube transcript and creates a YOUTUBE source from it. */
+    static async importYoutube(workspaceId: string, userId: string, input: ImportYoutubeInput) {
+        await WorkspaceService.getForUser(workspaceId, userId);
+
+        const transcript = await YoutubeClient.fetchTranscript(input.url);
+
+        return this.createAndQueue({
+            workspaceId,
+            type: "YOUTUBE",
+            title: input.title || `YouTube: ${transcript.videoId}`,
+            content: transcript.content,
+            url: input.url,
+            status: "PENDING",
+            metadata: {
+                videoId: transcript.videoId,
+            },
+        });
+    }
+
+    /** Saves a web search result the user chose to keep as a WEBSITE source. */
+    static async importWebSearch(workspaceId: string, userId: string, input: ImportWebSearchInput) {
+        await WorkspaceService.getForUser(workspaceId, userId);
+
+        return this.createAndQueue({
+            workspaceId,
+            type: "WEBSITE",
+            title: input.title,
+            content: input.content,
+            url: input.url,
+            status: "PENDING",
+            metadata: {
+                importedFrom: "web-search",
+                sourceUrl: input.url,
+            },
+        });
+    }
+
+    /**
+     * Deletes a source, cancelling its processing run and removing its vectors and chunks.
+     *
+     * @throws {APIError} NotFound when the source is not found
+     */
+    static async delete(workspaceId: string, sourceId: string, userId: string) {
+        await this.get(workspaceId, sourceId, userId);
+        await EventPublisher.sourceDeleted({ sourceId, workspaceId });
+        await SourceProcessingService.removeFromIndex(workspaceId, sourceId);
+        await SourceRepository.delete(sourceId);
+    }
+
+    /** Deletes multiple sources in sequence. */
+    static async bulkDelete(workspaceId: string, userId: string, sourceIds: string[]) {
+        await WorkspaceService.getForUser(workspaceId, userId);
+
+        for (const sourceId of sourceIds) {
+            await this.delete(workspaceId, sourceId, userId);
+        }
+    }
+
+    /** Returns indexed chunks for a source (debugging / admin UI). */
+    static async getChunks(workspaceId: string, sourceId: string, userId: string) {
+        await this.get(workspaceId, sourceId, userId);
+        return SourceProcessingService.listChunks(sourceId);
+    }
+
+    /**
+     * Clears a source's vectors/chunks and re-queues it for full re-indexing.
+     *
+     * @throws {APIError} NotFound when the source is not found
+     */
+    static async reprocess(workspaceId: string, sourceId: string, userId: string) {
+        const source = await this.get(workspaceId, sourceId, userId);
+
+        await SourceProcessingService.removeFromIndex(workspaceId, sourceId);
+
+        const metadata =
+            source.metadata &&
             typeof source.metadata === "object" &&
             !Array.isArray(source.metadata)
-            ? { ...(source.metadata as Record<string, unknown>) }
-            : {};
+                ? { ...(source.metadata as Record<string, unknown>) }
+                : {};
 
-    delete metadata.processingError;
+        delete metadata.processingError;
 
-    await updateSourceRecord(sourceId, {
-        status: "PENDING",
-        metadata: metadata as Prisma.InputJsonValue,
-    });
+        await SourceRepository.update(sourceId, {
+            status: "PENDING",
+            metadata: metadata as Prisma.InputJsonValue,
+        });
 
-    await enqueueSourceProcessing({ sourceId, workspaceId });
+        await EventPublisher.sourceCreated({ sourceId, workspaceId });
+    }
+
+    /**
+     * Re-queues FAILED sources. Without `sourceIds`, every failed source in the workspace
+     * is reprocessed; with them, only the failed sources in that list.
+     *
+     * @returns Count of sources that were requeued
+     */
+    static async reprocessFailed(
+        workspaceId: string,
+        userId: string,
+        input: ReprocessSourcesInput = {},
+    ) {
+        await WorkspaceService.getForUser(workspaceId, userId);
+
+        const sources = await SourceRepository.findAllByWorkspaceId(workspaceId, {
+            status: "FAILED",
+        });
+
+        const targets = input.sourceIds?.length
+            ? sources.filter((source) => input.sourceIds?.includes(source.id))
+            : sources;
+
+        for (const source of targets) {
+            await this.reprocess(workspaceId, source.id, userId);
+        }
+
+        return { reprocessed: targets.length };
+    }
 }

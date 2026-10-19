@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { workspaceIdParamSchema } from "./workspace.validator.js";
 
 export const sourceTypeSchema = z.enum([
     "PDF",
@@ -15,12 +16,7 @@ export const sourceStatusSchema = z.enum([
     "FAILED",
 ]);
 
-export const workspaceIdParamSchema = z.object({
-    workspaceId: z.string().trim().min(1),
-});
-
-export const sourceIdParamSchema = z.object({
-    workspaceId: z.string().trim().min(1),
+export const sourceIdParamSchema = workspaceIdParamSchema.extend({
     sourceId: z.string().trim().min(1),
 });
 

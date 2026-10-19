@@ -1,18 +1,14 @@
 import { Router } from "express";
-import {
-    createMemory,
-    deleteMemory,
-    listMemories,
-    updateMemory,
-} from "../controllers/memory.controller.js";
-import { asyncHandler } from "../utils/async-handler.js";
+import { MemoryController } from "../controllers/memory.controller.js";
 import { requireAuth } from "../middleware/require-auth-middleware.js";
+import { asyncHandler } from "../utils/async-handler.js";
 
-export const memoryRoutes = Router();
+/** `/api/memory` */
+export const memoryRouter = Router();
 
-memoryRoutes.use(requireAuth);
+memoryRouter.use(requireAuth);
 
-memoryRoutes.get("/", asyncHandler(listMemories));
-memoryRoutes.post("/", asyncHandler(createMemory));
-memoryRoutes.patch("/:memoryId", asyncHandler(updateMemory));
-memoryRoutes.delete("/:memoryId", asyncHandler(deleteMemory));
+memoryRouter.get("/", asyncHandler(MemoryController.list));
+memoryRouter.post("/", asyncHandler(MemoryController.create));
+memoryRouter.patch("/:memoryId", asyncHandler(MemoryController.update));
+memoryRouter.delete("/:memoryId", asyncHandler(MemoryController.delete));

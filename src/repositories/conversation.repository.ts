@@ -16,80 +16,78 @@ export type ConversationRecord = Prisma.ConversationGetPayload<{
     select: typeof conversationSelect;
 }>;
 
-export function findConversationsByWorkspaceId(workspaceId: string) {
-    return prisma.conversation.findMany({
-        where: { workspaceId },
-        select: conversationSelect,
-        orderBy: { updatedAt: "desc" },
-    });
-}
+/** Data access for conversations (Postgres). */
+export class ConversationRepository {
+    static findAllByWorkspaceId(workspaceId: string) {
+        return prisma.conversation.findMany({
+            where: { workspaceId },
+            select: conversationSelect,
+            orderBy: { updatedAt: "desc" },
+        });
+    }
 
-export function findConversationById(conversationId: string) {
-    return prisma.conversation.findUnique({
-        where: { id: conversationId },
-        select: conversationSelect,
-    });
-}
+    static findById(conversationId: string) {
+        return prisma.conversation.findUnique({
+            where: { id: conversationId },
+            select: conversationSelect,
+        });
+    }
 
-export function findConversationByIdAndWorkspaceId(
-    conversationId: string,
-    workspaceId: string,
-) {
-    return prisma.conversation.findFirst({
-        where: { id: conversationId, workspaceId },
-        select: conversationSelect,
-    });
-}
+    static findByIdAndWorkspaceId(conversationId: string, workspaceId: string) {
+        return prisma.conversation.findFirst({
+            where: { id: conversationId, workspaceId },
+            select: conversationSelect,
+        });
+    }
 
-export function createConversationRecord(workspaceId: string, title?: string) {
-    return prisma.conversation.create({
+    static create(workspaceId: string, title?: string) {
+        return prisma.conversation.create({
+            data: {
+                workspaceId,
+                title: title ?? null,
+            },
+            select: conversationSelect,
+        });
+    }
+
+    static update(conversationId: string, data: { title?: string | null }) {
+        return prisma.conversation.update({
+            where: { id: conversationId },
+            data,
+            select: conversationSelect,
+        });
+    }
+
+    static updateSummary(
+        conversationId: string,
         data: {
-            workspaceId,
-            title: title ?? null,
+            summary: string;
+            summaryMessageCount: number;
         },
-        select: conversationSelect,
-    });
-}
+    ) {
+        return prisma.conversation.update({
+            where: { id: conversationId },
+            data: {
+                summary: data.summary,
+                summaryMessageCount: data.summaryMessageCount,
+                summarizedAt: new Date(),
+            },
+            select: conversationSelect,
+        });
+    }
 
-export function updateConversationSummary(
-    conversationId: string,
-    data: {
-        summary: string;
-        summaryMessageCount: number;
-    },
-) {
-    return prisma.conversation.update({
-        where: { id: conversationId },
-        data: {
-            summary: data.summary,
-            summaryMessageCount: data.summaryMessageCount,
-            summarizedAt: new Date(),
-        },
-        select: conversationSelect,
-    });
-}
+    /** Bumps `updatedAt` so the conversation sorts to the top of the sidebar. */
+    static touch(conversationId: string) {
+        return prisma.conversation.update({
+            where: { id: conversationId },
+            data: { updatedAt: new Date() },
+            select: conversationSelect,
+        });
+    }
 
-export function updateConversationRecord(
-    conversationId: string,
-    data: { title?: string | null },
-) {
-    return prisma.conversation.update({
-        where: { id: conversationId },
-        data,
-        select: conversationSelect,
-    });
-}
-
-export function touchConversation(conversationId: string) {
-    return prisma.conversation.update({
-        where: { id: conversationId },
-        data: { updatedAt: new Date() },
-        select: conversationSelect,
-    });
-}
-
-export async function deleteConversationRecord(conversationId: string) {
-    await prisma.conversation.delete({
-        where: { id: conversationId },
-    });
+    static async delete(conversationId: string) {
+        await prisma.conversation.delete({
+            where: { id: conversationId },
+        });
+    }
 }

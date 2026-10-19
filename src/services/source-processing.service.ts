@@ -1,31 +1,36 @@
 /**
  * Source processing pipeline for RAG (Retrieval-Augmented Generation).
  *
- * When a user uploads a PDF or adds text, this service turns raw source data
- * into searchable vector embeddings. The full flow:
+ * Turns raw source data into searchable vector embeddings:
  *
  * ```
  * Source (PDF / text)
- *   → extractSourceContent   — pull plain text (from DB or Cloudinary PDF)
- *   → chunkSourceContent     — split into chunks, save to Postgres
- *   → embedAndIndexSource    — embed chunks with OpenAI, upsert to Pinecone
+ *   → extractAndChunk  — pull plain text (from DB or Cloudinary PDF), split, save chunks
+ *   → index            — embed chunks with OpenAI, replace vectors in Pinecone
  *   → status: READY
  * ```
  *
- * Inngest runs these steps as separate durable jobs.
+ * Inngest runs these as separate durable steps (see `inngest/index.ts`).
  */
 
-import { PineconeRecord } from "@pinecone-database/pinecone";
-import { Prisma } from "../generated/prisma/client.js";
-import { chunkPages, chunkText } from "../lib/chunking.js";
-import { extractPdfFromCloudinary } from "../lib/pdf.js";
-import { createSourceChunks, deleteChunksBySourceId, findChunksBySourceId, SourceChunkRecord } from "../repositories/source-chunk.repository.js";
-import { findSourceById, SourceRecord, updateSourceRecord } from "../repositories/source.repository.js";
-import { deleteSourceVectors, upsertSourceVectors, VectorMetadata } from "../lib/pinecone.js";
-import { embedTexts } from "../lib/openai.js";
+import type { PineconeRecord } from "@pinecone-database/pinecone";
+import type { Prisma } from "../generated/prisma/client.js";
+import { TextChunker } from "../lib/chunking.js";
+import { EmbeddingClient } from "../lib/openai.js";
+import { PdfExtractor } from "../lib/pdf.js";
+import type { VectorMetadata } from "../lib/pinecone.js";
+import {
+    SourceChunkRepository,
+    type SourceChunkRecord,
+} from "../repositories/source-chunk.repository.js";
+import { SourceRepository, type SourceRecord } from "../repositories/source.repository.js";
+import { VectorRepository } from "../repositories/vector.repository.js";
+
+/** Chunks embedded per OpenAI request. */
+const EMBED_BATCH_SIZE = 50;
 
 /** Shape of JSON stored on a source's `metadata` column. */
-type SourceMetadata = {
+export type SourceMetadata = {
     fileUrl?: string;
     fileName?: string;
     fileSize?: number;
@@ -39,277 +44,212 @@ type SourceMetadata = {
     indexedAt?: string;
 };
 
-/**
- * Sets a source's status to `PROCESSING` while the pipeline runs.
- *
- */
-export function markSourceProcessing(sourceId: string) {
-    return updateSourceRecord(sourceId, { status: "PROCESSING" });
+/** Reads `metadata` as an object, tolerating null or malformed JSON. */
+function readMetadata(metadata: SourceRecord["metadata"]): SourceMetadata {
+    return metadata && typeof metadata === "object" && !Array.isArray(metadata)
+        ? (metadata as SourceMetadata)
+        : {};
 }
 
-/**
- * Marks a source as `FAILED` and stores the error message in metadata.
- * Called when extract, chunk, or embed steps throw.
- *
- */
-export async function markSourceFailed(
-    sourceId: string,
-    error: unknown,
-    existingMetadata: SourceRecord["metadata"],
-) {
-    const message =
-        error instanceof Error ? error.message : "Source processing failed";
-
-    const metadata =
-        existingMetadata &&
-            typeof existingMetadata === "object" &&
-            !Array.isArray(existingMetadata)
-            ? (existingMetadata as SourceMetadata)
-            : {};
-
-    return updateSourceRecord(sourceId, {
-        status: "FAILED",
-        metadata: {
-            ...metadata,
-            processingError: message,
-        },
-    });
-}
-
-/**
- * Reads extractable text from a source record.
- *
- * **Two paths:**
- * 1. **Text already in DB** — returns `source.content` (TEXT, URL scrape, YouTube transcript, etc.)
- * 2. **PDF** — downloads from Cloudinary and runs PDF text extraction
- *
- * @throws If PDF is missing `fileUrl` or source has no content at all
- *
- *
- */
-async function extractSourceText(source: SourceRecord) {
-    const text = source.content?.trim();
-    if (text) {
-        return {
-            text,
-            pageCount: undefined,
-            pages: undefined,
-        };
+export class SourceProcessingService {
+    static markProcessing(sourceId: string) {
+        return SourceRepository.update(sourceId, { status: "PROCESSING" });
     }
 
-    if (source.type === "PDF") {
-        const metadata =
-            source.metadata &&
-                typeof source.metadata === "object" &&
-                !Array.isArray(source.metadata)
-                ? (source.metadata as SourceMetadata)
-                : {};
-        if (!metadata.fileUrl) {
-            throw new Error("PDF source is missing fileUrl metadata");
+    /**
+     * Marks a source as `FAILED` and stores the error message in metadata.
+     * No-op if the source was deleted meanwhile.
+     */
+    static async markFailed(sourceId: string, error: unknown) {
+        const source = await SourceRepository.findById(sourceId);
+        if (!source) {
+            return;
         }
 
-        const extracted = await extractPdfFromCloudinary({
-            fileUrl: metadata.fileUrl,
-            publicId: metadata.publicId,
-            resourceType: metadata.resourceType ?? "image",
+        const message =
+            error instanceof Error ? error.message : "Source processing failed";
+
+        await SourceRepository.update(sourceId, {
+            status: "FAILED",
+            metadata: {
+                ...readMetadata(source.metadata),
+                processingError: message,
+            },
         });
-        return {
-            text: extracted.text,
-            pageCount: extracted.pageCount,
-            pages: extracted.pages,
-        };
     }
 
-    throw new Error(`Source ${source.id} has no extractable content`);
-}
+    /**
+     * Reads extractable text from a source.
+     *
+     * 1. **Text already in DB** — `source.content` (TEXT, website scrape, YouTube transcript, etc.)
+     * 2. **PDF** — downloads from Cloudinary and runs PDF text extraction
+     *
+     * @throws If a PDF is missing `fileUrl` or the source has no content at all
+     */
+    private static async extractText(source: SourceRecord) {
+        const text = source.content?.trim();
+        if (text) {
+            return { text, pageCount: undefined, pages: undefined };
+        }
 
-/**
- * Step 1 of the pipeline: load text from the source and persist it.
- *
- * - Fetches the source from Postgres
- * - Extracts text (from `content` column or PDF on Cloudinary)
- * - Saves extracted text back to `source.content`
- * - Updates `metadata.pageCount` for PDFs
- *
- * @returns Extracted text plus page array (PDF only) for the chunking step
- *
- */
-export async function extractSourceContent(sourceId: string) {
-    const source = await findSourceById(sourceId);
-    if (!source) {
-        throw new Error("Source not found");
+        if (source.type === "PDF") {
+            const metadata = readMetadata(source.metadata);
+            if (!metadata.fileUrl) {
+                throw new Error("PDF source is missing fileUrl metadata");
+            }
+
+            const extracted = await PdfExtractor.fromCloudinary({
+                fileUrl: metadata.fileUrl,
+                publicId: metadata.publicId,
+                resourceType: metadata.resourceType ?? "image",
+            });
+            return {
+                text: extracted.text,
+                pageCount: extracted.pageCount,
+                pages: extracted.pages,
+            };
+        }
+
+        throw new Error(`Source ${source.id} has no extractable content`);
     }
 
-    const extracted = await extractSourceText(source);
-    const metadata =
-        source.metadata &&
-            typeof source.metadata === "object" &&
-            !Array.isArray(source.metadata)
-            ? (source.metadata as SourceMetadata)
-            : {};
+    /**
+     * Pipeline step 1: extract text, persist it, and replace the source's chunks.
+     *
+     * Extraction and chunking happen together so the full text and PDF pages never
+     * pass through Inngest step state (which is size-limited).
+     *
+     * @returns Number of chunks saved
+     */
+    static async extractAndChunk(sourceId: string) {
+        const source = await SourceRepository.findById(sourceId);
+        if (!source) {
+            throw new Error("Source not found");
+        }
 
-    await updateSourceRecord(sourceId, {
-        content: extracted.text,
-        metadata: {
-            ...metadata,
-            pageCount: extracted.pageCount ?? metadata.pageCount,
-        },
-    });
+        const extracted = await this.extractText(source);
+        const metadata = readMetadata(source.metadata);
 
-    return {
-        sourceId,
-        workspaceId: source.workspaceId,
-        text: extracted.text,
-        pages: extracted.pages,
-        source,
-    };
-}
+        await SourceRepository.update(sourceId, {
+            content: extracted.text,
+            metadata: {
+                ...metadata,
+                pageCount: extracted.pageCount ?? metadata.pageCount,
+            },
+        });
 
-/**
- * Step 2 of the pipeline: split text into chunks and save to Postgres.
- *
- * - Deletes any existing chunks for this source (safe re-processing)
- * - Uses `chunkPages` when PDF page array is available (keeps page metadata)
- * - Otherwise uses `chunkText` on the full string
- * - Stores each chunk with an estimated `tokenCount`
- *
- * @param sourceId - Source to attach chunks to
- * @param text - Full extracted text
- * @param pages - Optional per-page strings from PDF extraction
- * @returns Saved chunk records from the database
- *
- *
- */
-export async function chunkSourceContent(
-    sourceId: string,
-    text: string,
-    pages?: string[],
-) {
-    await deleteChunksBySourceId(sourceId);
+        await SourceChunkRepository.deleteAllBySourceId(sourceId);
 
-    const chunks = pages?.length ? chunkPages(pages) : chunkText(text);
+        const chunks = extracted.pages?.length
+            ? TextChunker.chunkPages(extracted.pages)
+            : TextChunker.chunkText(extracted.text);
 
-    if (chunks.length === 0) {
-        throw new Error("No chunks were generated from source content");
+        if (chunks.length === 0) {
+            throw new Error("No chunks were generated from source content");
+        }
+
+        const saved = await SourceChunkRepository.createMany(
+            chunks.map((chunk) => ({
+                sourceId,
+                index: chunk.index,
+                content: chunk.content,
+                tokenCount: Math.ceil(chunk.content.length / 4),
+                metadata: chunk.metadata as Prisma.InputJsonValue | undefined,
+            })),
+        );
+
+        return { chunkCount: saved.length };
     }
 
-    return createSourceChunks(
-        chunks.map((chunk) => ({
-            sourceId,
-            index: chunk.index,
-            content: chunk.content,
-            tokenCount: Math.ceil(chunk.content.length / 4),
-            metadata: chunk.metadata as Prisma.InputJsonValue | undefined,
-        })),
-    );
-}
+    /** Embeds chunks in batches and builds Pinecone records with retrieval metadata. */
+    private static async buildVectorRecords(
+        source: SourceRecord,
+        chunks: SourceChunkRecord[],
+    ) {
+        const records: PineconeRecord<VectorMetadata>[] = [];
 
+        for (let i = 0; i < chunks.length; i += EMBED_BATCH_SIZE) {
+            const batch = chunks.slice(i, i + EMBED_BATCH_SIZE);
+            const embeddings = await EmbeddingClient.embed(batch.map((chunk) => chunk.content));
 
-/**
- * Step 3 of the pipeline: embed chunks and store vectors in Pinecone.
- *
- * - Sends chunk text to OpenAI in batches of 50
- * - Builds Pinecone records with embedding + searchable metadata
- * - Replaces the source's vectors in the workspace namespace (stale vectors are deleted first)
- * - Marks source as `READY` with `chunkCount` and `indexedAt`
- *
- * Pinecone metadata includes enough context for retrieval without re-querying Postgres:
- * `sourceTitle`, `sourceType`, chunk `text` (truncated to 35k chars), and optional `page`.
- *
- * @param source - The parent source record
- * @param chunks - Chunk rows already saved in Postgres (must have `id`)
- * @returns Updated source record with status `READY`, or `null` if the source was deleted mid-run
- *
- *
- */
-export async function embedAndIndexSource(
-    source: SourceRecord,
-    chunks: SourceChunkRecord[],
-) {
-    const batchSize = 50;
-    const records: PineconeRecord<VectorMetadata>[] = [];
-
-    for (let i = 0; i < chunks.length; i += batchSize) {
-        const batch = chunks.slice(i, i + batchSize);
-        const embeddings = await embedTexts(batch.map((chunk) => chunk.content));
-
-        for (let j = 0; j < batch.length; j += 1) {
-            const chunk = batch[j]!;
-            const embedding = embeddings[j]!;
-            const chunkMetadata =
-                chunk.metadata &&
+            batch.forEach((chunk, j) => {
+                const chunkMetadata =
+                    chunk.metadata &&
                     typeof chunk.metadata === "object" &&
                     !Array.isArray(chunk.metadata)
-                    ? (chunk.metadata as Record<string, unknown>)
-                    : {};
+                        ? (chunk.metadata as Record<string, unknown>)
+                        : {};
 
-            records.push({
-                id: chunk.id,
-                values: embedding,
-                metadata: {
-                    workspaceId: source.workspaceId,
-                    sourceId: source.id,
-                    chunkId: chunk.id,
-                    chunkIndex: chunk.index,
-                    sourceTitle: source.title,
-                    sourceType: source.type,
-                    text: chunk.content.slice(0, 35000),
-                    ...(typeof chunkMetadata.page === "number"
-                        ? { page: chunkMetadata.page }
-                        : {}),
-                },
+                records.push({
+                    id: chunk.id,
+                    values: embeddings[j]!,
+                    metadata: {
+                        workspaceId: source.workspaceId,
+                        sourceId: source.id,
+                        chunkId: chunk.id,
+                        chunkIndex: chunk.index,
+                        sourceTitle: source.title,
+                        sourceType: source.type,
+                        text: chunk.content.slice(0, 35000),
+                        ...(typeof chunkMetadata.page === "number"
+                            ? { page: chunkMetadata.page }
+                            : {}),
+                    },
+                });
             });
         }
+
+        return records;
     }
 
-    // Clear vectors from any earlier run first: chunk ids are regenerated on every
-    // run, so upserting alone would leave the previous run's vectors orphaned.
-    await deleteSourceVectors(source.workspaceId, source.id);
-    await upsertSourceVectors(source.workspaceId, records);
+    /**
+     * Pipeline step 2: embed the source's chunks, replace its vectors, and mark it `READY`.
+     *
+     * Pinecone metadata includes enough context for retrieval without re-querying Postgres:
+     * `sourceTitle`, `sourceType`, chunk `text` (truncated to 35k chars), and optional `page`.
+     *
+     * @returns Updated source, or `null` if the source was deleted mid-run
+     */
+    static async index(sourceId: string) {
+        const source = await SourceRepository.findById(sourceId);
+        if (!source) {
+            throw new Error("Source not found");
+        }
 
-    // The source may have been deleted while we were embedding; don't leave its vectors behind.
-    if (!(await findSourceById(source.id))) {
-        await deleteSourceVectors(source.workspaceId, source.id);
-        return null;
+        const chunks = await SourceChunkRepository.findAllBySourceId(sourceId);
+        const records = await this.buildVectorRecords(source, chunks);
+
+        // Clear vectors from any earlier run first: chunk ids are regenerated on every
+        // run, so upserting alone would leave the previous run's vectors orphaned.
+        await VectorRepository.deleteBySourceId(source.workspaceId, source.id);
+        await VectorRepository.upsert(source.workspaceId, records);
+
+        // The source may have been deleted while we were embedding; don't leave its vectors behind.
+        if (!(await SourceRepository.findById(source.id))) {
+            await VectorRepository.deleteBySourceId(source.workspaceId, source.id);
+            return null;
+        }
+
+        return SourceRepository.update(source.id, {
+            status: "READY",
+            metadata: {
+                ...readMetadata(source.metadata),
+                chunkCount: chunks.length,
+                indexedAt: new Date().toISOString(),
+                processingError: undefined,
+            },
+        });
     }
 
-    const metadata =
-        source.metadata &&
-            typeof source.metadata === "object" &&
-            !Array.isArray(source.metadata)
-            ? (source.metadata as SourceMetadata)
-            : {};
+    /** Removes a source's vectors and chunks (before delete or full re-index). */
+    static async removeFromIndex(workspaceId: string, sourceId: string) {
+        await VectorRepository.deleteBySourceId(workspaceId, sourceId);
+        await SourceChunkRepository.deleteAllBySourceId(sourceId);
+    }
 
-    return updateSourceRecord(source.id, {
-        status: "READY",
-        metadata: {
-            ...metadata,
-            chunkCount: chunks.length,
-            indexedAt: new Date().toISOString(),
-            processingError: undefined,
-        },
-    });
-}
-
-/**
- * Removes a source from the vector index and deletes its chunks from Postgres.
- * Used when a source is deleted or needs to be fully re-indexed from scratch.
- *
- */
-export async function removeSourceFromIndex(
-    workspaceId: string,
-    sourceId: string,
-) {
-    await deleteSourceVectors(workspaceId, sourceId);
-    await deleteChunksBySourceId(sourceId);
-}
-
-/**
- * Returns all chunks for a source plus the total count.
- * Useful for debugging, admin UI, or verifying processing completed.
- *
- */
-export async function listChunksForSource(sourceId: string) {
-    const chunks = await findChunksBySourceId(sourceId);
-    return { chunks, count: chunks.length };
+    /** Returns all chunks for a source plus the total count. */
+    static async listChunks(sourceId: string) {
+        const chunks = await SourceChunkRepository.findAllBySourceId(sourceId);
+        return { chunks, count: chunks.length };
+    }
 }

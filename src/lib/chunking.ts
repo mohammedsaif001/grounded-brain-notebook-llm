@@ -141,85 +141,84 @@ function splitText(
     return chunks;
 }
 
-/**
- * Public API: split any plain string into numbered `TextChunk` objects.
- *
- * This is the function you call for articles, transcripts, scraped web text, etc.
- * Each chunk gets a sequential `index` and optional shared `metadata`.
- *
- * @param text - The full document text
- * @param options.chunkSize - Max characters per chunk (default: 1000)
- * @param options.chunkOverlap - Overlap for character-level splits (default: 100)
- * @param options.metadata - Extra fields attached to every chunk (e.g. `{ sourceId: "abc" }`)
- * @returns Array of `TextChunk` ready for embedding/storage
- */
-export function chunkText(
-    text: string,
-    options: {
-        chunkSize?: number;
-        chunkOverlap?: number;
-        metadata?: Record<string, unknown>;
-    } = {},
-): TextChunk[] {
-    const chunkSize = options.chunkSize ?? DEFAULT_CHUNK_SIZE;
-    const chunkOverlap = options.chunkOverlap ?? DEFAULT_CHUNK_OVERLAP;
-    const parts = splitText(text.trim(), chunkSize, chunkOverlap)
-        .map((part) => part.trim())
-        .filter(Boolean);
+export class TextChunker {
+    /**
+     * Splits any plain string into numbered `TextChunk` objects.
+     *
+     * Use for articles, transcripts, scraped web text, etc. Each chunk gets a
+     * sequential `index` and optional shared `metadata`.
+     *
+     * @param text - The full document text
+     * @param options.chunkSize - Max characters per chunk (default: 1000)
+     * @param options.chunkOverlap - Characters carried over between chunks (default: 100)
+     * @param options.metadata - Extra fields attached to every chunk (e.g. `{ page: 3 }`)
+     * @returns Array of `TextChunk` ready for embedding/storage
+     */
+    static chunkText(
+        text: string,
+        options: {
+            chunkSize?: number;
+            chunkOverlap?: number;
+            metadata?: Record<string, unknown>;
+        } = {},
+    ): TextChunk[] {
+        const chunkSize = options.chunkSize ?? DEFAULT_CHUNK_SIZE;
+        const chunkOverlap = options.chunkOverlap ?? DEFAULT_CHUNK_OVERLAP;
+        const parts = splitText(text.trim(), chunkSize, chunkOverlap)
+            .map((part) => part.trim())
+            .filter(Boolean);
 
-    return parts.map((content, index) => ({
-        index,
-        content,
-        metadata: options.metadata,
-    }));
-}
-
-/**
- * Chunk a multi-page document (e.g. PDF pages) while preserving page numbers.
- *
- * Unlike `chunkText`, this:
- * - processes each page separately (chunks never span two pages)
- * - assigns `metadata.page` (1-based) to every chunk from that page
- * - re-numbers `index` globally across all pages (0, 1, 2, …)
- *
- * Empty or whitespace-only pages are skipped.
- *
- * @param pages - Array of page texts, e.g. from `extractPdfPages()`
- * @param options.chunkSize - Max characters per chunk (default: 1000)
- * @param options.chunkOverlap - Overlap for character-level splits (default: 100)
- * @returns Flat list of chunks from all pages with page metadata
- *
- */
-export function chunkPages(
-    pages: string[],
-    options: {
-        chunkSize?: number;
-        chunkOverlap?: number;
-    } = {},
-): TextChunk[] {
-    const chunks: TextChunk[] = [];
-    let index = 0;
-
-    for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
-        const pageText = pages[pageIndex].trim();
-        if (!pageText) {
-            continue;
-        }
-
-        const pageChunks = chunkText(pageText, {
-            ...options,
-            metadata: { page: pageIndex + 1 },
-        });
-
-        for (const chunk of pageChunks) {
-            chunks.push({
-                index,
-                content: chunk.content,
-                metadata: chunk.metadata,
-            });
-            index += 1;
-        }
+        return parts.map((content, index) => ({
+            index,
+            content,
+            metadata: options.metadata,
+        }));
     }
 
-    return chunks;
+    /**
+     * Chunks a multi-page document (e.g. PDF pages) while preserving page numbers.
+     *
+     * Unlike {@link TextChunker.chunkText}, this:
+     * - processes each page separately (chunks never span two pages)
+     * - assigns `metadata.page` (1-based) to every chunk from that page
+     * - re-numbers `index` globally across all pages (0, 1, 2, …)
+     *
+     * Empty or whitespace-only pages are skipped.
+     *
+     * @param pages - Array of page texts, e.g. from `PdfExtractor`
+     * @returns Flat list of chunks from all pages with page metadata
+     */
+    static chunkPages(
+        pages: string[],
+        options: {
+            chunkSize?: number;
+            chunkOverlap?: number;
+        } = {},
+    ): TextChunk[] {
+        const chunks: TextChunk[] = [];
+        let index = 0;
+
+        for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
+            const pageText = pages[pageIndex].trim();
+            if (!pageText) {
+                continue;
+            }
+
+            const pageChunks = this.chunkText(pageText, {
+                ...options,
+                metadata: { page: pageIndex + 1 },
+            });
+
+            for (const chunk of pageChunks) {
+                chunks.push({
+                    index,
+                    content: chunk.content,
+                    metadata: chunk.metadata,
+                });
+                index += 1;
+            }
+        }
+
+        return chunks;
+    }
 }

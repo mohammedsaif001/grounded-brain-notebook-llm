@@ -1,6 +1,6 @@
 import { Prisma } from "../generated/prisma/client.js";
 import prisma from "../lib/db.js";
-import { ListSourcesQuery } from "../validators/source.validator.js";
+import type { ListSourcesQuery } from "../validators/source.validator.js";
 
 export const sourceSelect = {
     id: true,
@@ -46,10 +46,16 @@ export type CreateSourceData = {
     metadata?: Prisma.InputJsonValue;
 };
 
+export type UpdateSourceData = {
+    content?: string | null;
+    status?: SourceRecord["status"];
+    metadata?: Prisma.InputJsonValue;
+};
+
 function buildSourcesWhere(workspaceId: string, filters: ListSourcesQuery) {
     const where: Prisma.SourceWhereInput = {
         workspaceId,
-    }
+    };
 
     if (filters.type) {
         where.type = filters.type;
@@ -65,91 +71,83 @@ function buildSourcesWhere(workspaceId: string, filters: ListSourcesQuery) {
                 title: {
                     contains: filters.q,
                     mode: "insensitive",
-                }
+                },
             },
             {
                 content: {
                     contains: filters.q,
                     mode: "insensitive",
-                }
-            }
-        ]
+                },
+            },
+        ];
     }
 
     return where;
 }
 
-/** Lists sources without their `content`; use for listings and status checks. */
-export function findSourcesByWorkspaceId(workspaceId: string, filters: ListSourcesQuery = {}) {
-    return prisma.source.findMany({
-        where: buildSourcesWhere(workspaceId, filters),
-        select: sourceSummarySelect,
-        orderBy: { createdAt: "desc" },
-    })
-}
+/** Data access for workspace sources (Postgres). */
+export class SourceRepository {
+    /** Lists sources without their `content`; use for listings and status checks. */
+    static findAllByWorkspaceId(workspaceId: string, filters: ListSourcesQuery = {}) {
+        return prisma.source.findMany({
+            where: buildSourcesWhere(workspaceId, filters),
+            select: sourceSummarySelect,
+            orderBy: { createdAt: "desc" },
+        });
+    }
 
-/** Lists sources including full `content`; only for callers that need the text. */
-export function findSourcesWithContentByWorkspaceId(
-    workspaceId: string,
-    filters: ListSourcesQuery = {},
-) {
-    return prisma.source.findMany({
-        where: buildSourcesWhere(workspaceId, filters),
-        select: sourceSelect,
-        orderBy: { createdAt: "desc" },
-    })
-}
+    /** Lists sources including full `content`; only for callers that need the text. */
+    static findAllWithContentByWorkspaceId(
+        workspaceId: string,
+        filters: ListSourcesQuery = {},
+    ) {
+        return prisma.source.findMany({
+            where: buildSourcesWhere(workspaceId, filters),
+            select: sourceSelect,
+            orderBy: { createdAt: "desc" },
+        });
+    }
 
+    static findById(sourceId: string) {
+        return prisma.source.findUnique({
+            where: { id: sourceId },
+            select: sourceSelect,
+        });
+    }
 
-export function findSourceByIdAndWorkspaceId(
-    sourceId: string,
-    workspaceId: string,
-) {
-    return prisma.source.findFirst({
-        where: { id: sourceId, workspaceId },
-        select: sourceSelect,
-    });
-}
+    static findByIdAndWorkspaceId(sourceId: string, workspaceId: string) {
+        return prisma.source.findFirst({
+            where: { id: sourceId, workspaceId },
+            select: sourceSelect,
+        });
+    }
 
-export function createSourceRecord(data: CreateSourceData) {
-    return prisma.source.create({
-        data: {
-            workspaceId: data.workspaceId,
-            type: data.type,
-            title: data.title,
-            content: data.content ?? null,
-            url: data.url ?? null,
-            status: data.status ?? "PENDING",
-            metadata: data.metadata,
-        },
-        select: sourceSelect,
-    });
-}
+    static create(data: CreateSourceData) {
+        return prisma.source.create({
+            data: {
+                workspaceId: data.workspaceId,
+                type: data.type,
+                title: data.title,
+                content: data.content ?? null,
+                url: data.url ?? null,
+                status: data.status ?? "PENDING",
+                metadata: data.metadata,
+            },
+            select: sourceSelect,
+        });
+    }
 
-export function findSourceById(sourceId: string) {
-    return prisma.source.findUnique({
-        where: { id: sourceId },
-        select: sourceSelect,
-    });
-}
+    static update(sourceId: string, data: UpdateSourceData) {
+        return prisma.source.update({
+            where: { id: sourceId },
+            data,
+            select: sourceSelect,
+        });
+    }
 
-export function updateSourceRecord(
-    sourceId: string,
-    data: {
-        content?: string | null;
-        status?: SourceRecord["status"];
-        metadata?: Prisma.InputJsonValue;
-    },
-) {
-    return prisma.source.update({
-        where: { id: sourceId },
-        data,
-        select: sourceSelect,
-    });
-}
-
-export async function deleteSourceRecord(sourceId: string) {
-    await prisma.source.delete({
-        where: { id: sourceId },
-    });
+    static async delete(sourceId: string) {
+        await prisma.source.delete({
+            where: { id: sourceId },
+        });
+    }
 }

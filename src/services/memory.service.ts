@@ -1,79 +1,65 @@
 import {
-    addUserMemory,
-    deleteUserMemory,
-    getUserMemory,
-    updateUserMemory,
-} from "../lib/mem0.js";
+    MemoryRepository,
+    type MemoryMessage,
+} from "../repositories/memory.repository.js";
 import { APIError } from "../utils/api-error.js";
 
-/**
- * Verifies that a memory exists and belongs to the given user.
- *
- * Memories owned by other users are reported as not found so their ids can't be probed.
- *
- * @param userId - Authenticated user's id
- * @param memoryId - Mem0 memory id
- * @throws {APIError} NotFound when the memory does not exist or belongs to another user
- *
- */
-async function assertMemoryOwnedByUser(userId: string, memoryId: string) {
-    const memory = await getUserMemory(memoryId);
+/** User memory business logic (manual memories plus memories learned from chat). */
+export class MemoryService {
+    /**
+     * Verifies that a memory exists and belongs to the given user.
+     *
+     * Memories owned by other users are reported as not found so their ids can't be probed.
+     *
+     * @throws {APIError} NotFound when the memory does not exist or belongs to another user
+     */
+    private static async assertOwnedByUser(userId: string, memoryId: string) {
+        const memory = await MemoryRepository.findById(memoryId);
 
-    if (!memory || memory.userId !== userId) {
-        throw APIError.NotFound("Memory not found");
+        if (!memory || memory.userId !== userId) {
+            throw APIError.NotFound("Memory not found");
+        }
     }
-}
 
-/**
- * Creates a user-authored memory (not inferred by Mem0).
- *
- * @param userId - Owner of the memory
- * @param input - Raw memory text from the client
- * @returns Created Mem0 memory record
- * @throws {APIError} BadRequest when memory text is empty after trimming
- *
- *
- */
-export function createMemoryForUser(
-    userId: string,
-    input: { memory: string },
-) {
-    return addUserMemory(userId, {
-        memory: input.memory,
-        infer: false,
-        metadata: { source: "manual" },
-    });
-}
+    static listForUser(userId: string) {
+        return MemoryRepository.findAllByUserId(userId);
+    }
 
-/**
- * Updates the text of a memory after verifying the user owns it.
- *
- * @param userId - Authenticated user's id
- * @param memoryId - Mem0 memory id to update
- * @param input - New memory text
- * @returns Updated Mem0 memory record
- * @throws {APIError} NotFound when the memory is missing or owned by another user
- *
- */
-export async function updateMemoryForUser(
-    userId: string,
-    memoryId: string,
-    input: { memory: string },
-) {
-    await assertMemoryOwnedByUser(userId, memoryId);
-    return updateUserMemory(memoryId, input);
-}
+    /** Memories relevant to `query`, for injecting into the chat prompt. */
+    static search(userId: string, query: string) {
+        return MemoryRepository.search(userId, query);
+    }
 
-/**
- * Deletes a memory after verifying the user owns it.
- *
- * @param userId - Authenticated user's id
- * @param memoryId - Mem0 memory id to delete
- * @returns Resolves when deletion completes
- * @throws {APIError} NotFound when the memory is missing or owned by another user
- *
- */
-export async function deleteMemoryForUser(userId: string, memoryId: string) {
-    await assertMemoryOwnedByUser(userId, memoryId);
-    await deleteUserMemory(memoryId);
+    /** Stores a user-authored memory verbatim (not inferred). */
+    static create(userId: string, input: { memory: string }) {
+        return MemoryRepository.create(userId, {
+            memory: input.memory,
+            metadata: { source: "manual" },
+        });
+    }
+
+    /** Lets Mem0 infer new memories from conversation turns. */
+    static learnFromMessages(
+        userId: string,
+        messages: MemoryMessage[],
+        metadata?: Record<string, unknown>,
+    ) {
+        return MemoryRepository.createFromMessages(userId, messages, metadata);
+    }
+
+    /**
+     * @throws {APIError} NotFound when the memory is missing or owned by another user
+     */
+    static async update(userId: string, memoryId: string, input: { memory: string }) {
+        await this.assertOwnedByUser(userId, memoryId);
+        return MemoryRepository.update(memoryId, input);
+    }
+
+    /**
+     * @throws {APIError} NotFound when the memory is missing or owned by another user
+     */
+    static async delete(userId: string, memoryId: string) {
+        await this.assertOwnedByUser(userId, memoryId);
+        await MemoryRepository.delete(memoryId);
+    }
 }

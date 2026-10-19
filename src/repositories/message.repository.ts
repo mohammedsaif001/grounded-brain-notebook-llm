@@ -21,42 +21,43 @@ export type CreateMessageData = {
     citations?: Prisma.InputJsonValue;
 };
 
-export function findMessagesByConversationId(conversationId: string) {
-    return prisma.message.findMany({
-        where: { conversationId },
-        select: messageSelect,
-        orderBy: { createdAt: "asc" },
-    });
-}
+/** Data access for chat messages (Postgres). */
+export class MessageRepository {
+    static findAllByConversationId(conversationId: string) {
+        return prisma.message.findMany({
+            where: { conversationId },
+            select: messageSelect,
+            orderBy: { createdAt: "asc" },
+        });
+    }
 
-export async function findRecentMessagesByConversationId(
-    conversationId: string,
-    limit: number,
-) {
-    const messages = await prisma.message.findMany({
-        where: { conversationId },
-        select: messageSelect,
-        orderBy: { createdAt: "desc" },
-        take: limit,
-    });
+    /** Returns the latest `limit` messages, oldest first. */
+    static async findRecentByConversationId(conversationId: string, limit: number) {
+        const messages = await prisma.message.findMany({
+            where: { conversationId },
+            select: messageSelect,
+            orderBy: { createdAt: "desc" },
+            take: limit,
+        });
 
-    return messages.reverse();
-}
+        return messages.reverse();
+    }
 
-export function countMessagesByConversationId(conversationId: string) {
-    return prisma.message.count({
-        where: { conversationId },
-    });
-}
+    static countByConversationId(conversationId: string) {
+        return prisma.message.count({
+            where: { conversationId },
+        });
+    }
 
-export function createMessageRecord(data: CreateMessageData) {
-    return prisma.message.create({
-        data: {
-            conversationId: data.conversationId,
-            role: data.role,
-            content: data.content,
-            citations: data.citations,
-        },
-        select: messageSelect,
-    });
+    static create(data: CreateMessageData) {
+        return prisma.message.create({
+            data: {
+                conversationId: data.conversationId,
+                role: data.role,
+                content: data.content,
+                citations: data.citations,
+            },
+            select: messageSelect,
+        });
+    }
 }

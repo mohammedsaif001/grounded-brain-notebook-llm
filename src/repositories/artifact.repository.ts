@@ -27,63 +27,62 @@ export type CreateArtifactData = {
     metadata?: Prisma.InputJsonValue;
 };
 
-export function findArtifactsByWorkspaceId(workspaceId: string) {
-    return prisma.learningArtifact.findMany({
-        where: { workspaceId },
-        select: artifactSelect,
-        orderBy: { createdAt: "desc" },
-    });
-}
+export type UpdateArtifactData = {
+    title?: string;
+    content?: Prisma.InputJsonValue;
+    status?: ArtifactRecord["status"];
+    metadata?: Prisma.InputJsonValue;
+};
 
-export function findArtifactByIdAndWorkspaceId(
-    artifactId: string,
-    workspaceId: string,
-) {
-    return prisma.learningArtifact.findFirst({
-        where: { id: artifactId, workspaceId },
-        select: artifactSelect,
-    });
-}
+/** Data access for learning artifacts (Postgres). */
+export class ArtifactRepository {
+    static findAllByWorkspaceId(workspaceId: string) {
+        return prisma.learningArtifact.findMany({
+            where: { workspaceId },
+            select: artifactSelect,
+            orderBy: { createdAt: "desc" },
+        });
+    }
 
-export function createArtifactRecord(data: CreateArtifactData) {
-    return prisma.learningArtifact.create({
-        data: {
-            workspaceId: data.workspaceId,
-            type: data.type,
-            title: data.title,
-            sourceIds: data.sourceIds,
-            status: data.status ?? "PENDING",
-            metadata: data.metadata,
-        },
-        select: artifactSelect,
-    });
-}
+    static findById(artifactId: string) {
+        return prisma.learningArtifact.findUnique({
+            where: { id: artifactId },
+            select: artifactSelect,
+        });
+    }
 
-export function updateArtifactRecord(
-    artifactId: string,
-    data: {
-        title?: string;
-        content?: Prisma.InputJsonValue;
-        status?: ArtifactRecord["status"];
-        metadata?: Prisma.InputJsonValue;
-    },
-) {
-    return prisma.learningArtifact.update({
-        where: { id: artifactId },
-        data,
-        select: artifactSelect,
-    });
-}
+    static findByIdAndWorkspaceId(artifactId: string, workspaceId: string) {
+        return prisma.learningArtifact.findFirst({
+            where: { id: artifactId, workspaceId },
+            select: artifactSelect,
+        });
+    }
 
-export async function deleteArtifactRecord(artifactId: string) {
-    await prisma.learningArtifact.delete({
-        where: { id: artifactId },
-    });
-}
+    static create(data: CreateArtifactData) {
+        return prisma.learningArtifact.create({
+            data: {
+                workspaceId: data.workspaceId,
+                type: data.type,
+                title: data.title,
+                sourceIds: data.sourceIds,
+                status: data.status ?? "PENDING",
+                metadata: data.metadata,
+            },
+            select: artifactSelect,
+        });
+    }
 
-export function findArtifactById(artifactId: string) {
-    return prisma.learningArtifact.findUnique({
-        where: { id: artifactId },
-        select: artifactSelect,
-    });
+    static update(artifactId: string, data: UpdateArtifactData) {
+        return prisma.learningArtifact.update({
+            where: { id: artifactId },
+            data,
+            select: artifactSelect,
+        });
+    }
+
+    static async delete(artifactId: string) {
+        await prisma.learningArtifact.delete({
+            where: { id: artifactId },
+        });
+    }
 }

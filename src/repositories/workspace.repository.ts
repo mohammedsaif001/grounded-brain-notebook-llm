@@ -24,50 +24,44 @@ export type WorkspaceRecord = {
     updatedAt: Date;
 };
 
-export function findWorkspacesByUserId(userId: string) {
-    return prisma.workspace.findMany({
-        where: { userId },
-        select: workspaceSelect,
-        orderBy: { updatedAt: "desc" },
-    });
-}
+/** Data access for workspaces (Postgres). */
+export class WorkspaceRepository {
+    static findAllByUserId(userId: string) {
+        return prisma.workspace.findMany({
+            where: { userId },
+            select: workspaceSelect,
+            orderBy: { updatedAt: "desc" },
+        });
+    }
 
-export function findWorkspaceByIdAndUserId(
-    workspaceId: string,
-    userId: string,
-) {
-    return prisma.workspace.findFirst({
-        where: { id: workspaceId, userId },
-        select: workspaceSelect,
-    });
-}
+    static findByIdAndUserId(workspaceId: string, userId: string) {
+        return prisma.workspace.findFirst({
+            where: { id: workspaceId, userId },
+            select: workspaceSelect,
+        });
+    }
 
-export function createWorkspaceRecord(
-    userId: string,
-    data: CreateWorkspaceInput,
-) {
-    return prisma.workspace.create({
-        data: {
-            userId,
-            ...data,
-        },
-        select: workspaceSelect,
-    });
-}
+    static create(userId: string, data: CreateWorkspaceInput) {
+        return prisma.workspace.create({
+            data: {
+                userId,
+                ...data,
+            },
+            select: workspaceSelect,
+        });
+    }
 
-export function updateWorkspaceRecord(
-    workspaceId: string,
-    data: UpdateWorkspaceInput,
-) {
-    return prisma.workspace.update({
-        where: { id: workspaceId },
-        data,
-        select: workspaceSelect,
-    });
-}
+    static update(workspaceId: string, data: UpdateWorkspaceInput) {
+        return prisma.workspace.update({
+            where: { id: workspaceId },
+            data,
+            select: workspaceSelect,
+        });
+    }
 
-export async function deleteWorkspaceRecord(workspaceId: string) {
-    await prisma.workspace.delete({
-        where: { id: workspaceId },
-    });
+    static async delete(workspaceId: string) {
+        await prisma.workspace.delete({
+            where: { id: workspaceId },
+        });
+    }
 }

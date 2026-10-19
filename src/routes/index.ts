@@ -1,15 +1,24 @@
 import type { Express } from "express";
-import { workspaceRoutes } from "./workspace.routes.js";
-import { sourceRoutes } from "./source.route.js";
-import { chatRoutes, conversationRoutes } from "./chat.routes.js";
-import { memoryRoutes } from "./memory.routes.js";
-import { artifactRoutes } from "./artifact.routes.js";
+import { artifactRouter } from "./artifact.routes.js";
+import { chatRouter } from "./chat.routes.js";
+import { conversationRouter } from "./conversation.routes.js";
+import { memoryRouter } from "./memory.routes.js";
+import { sourceRouter } from "./source.routes.js";
+import { workspaceRouter } from "./workspace.routes.js";
 
-export function registerRoutes(app: Express): void{
-    workspaceRoutes.use("/:workspaceId/sources", sourceRoutes);
-    workspaceRoutes.use("/:workspaceId/conversations", conversationRoutes);
-    workspaceRoutes.use("/:workspaceId/chat", chatRoutes);
-    workspaceRoutes.use("/:workspaceId/artifacts", artifactRoutes);
-    app.use("/api/workspaces", workspaceRoutes);
-    app.use("/api/memory", memoryRoutes);
+/**
+ * Mounts all API routers.
+ *
+ * Request flow: routes → controllers → services → repositories.
+ * Workspace-scoped routers are nested under `workspaceRouter`, so they inherit its
+ * `requireAuth` and receive `:workspaceId` via `mergeParams`.
+ */
+export function registerRoutes(app: Express): void {
+    workspaceRouter.use("/:workspaceId/sources", sourceRouter);
+    workspaceRouter.use("/:workspaceId/conversations", conversationRouter);
+    workspaceRouter.use("/:workspaceId/chat", chatRouter);
+    workspaceRouter.use("/:workspaceId/artifacts", artifactRouter);
+
+    app.use("/api/workspaces", workspaceRouter);
+    app.use("/api/memory", memoryRouter);
 }

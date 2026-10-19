@@ -1,13 +1,15 @@
 import { Router } from "express";
+import { WorkspaceController } from "../controllers/workspace.controller.js";
 import { requireAuth } from "../middleware/require-auth-middleware.js";
 import { asyncHandler } from "../utils/async-handler.js";
-import * as controllers from "../controllers/workspace.controller.js";
 
-export const workspaceRoutes = Router();
-workspaceRoutes.use(requireAuth);
+/** `/api/workspaces` — nested workspace routers are mounted in `routes/index.ts`. */
+export const workspaceRouter = Router();
 
-workspaceRoutes.get("/", asyncHandler(controllers.listWorkspaces));
-workspaceRoutes.post("/", asyncHandler(controllers.createWorkspace));
-workspaceRoutes.get("/:workspaceId", asyncHandler(controllers.getWorkspace));
-workspaceRoutes.patch("/:workspaceId", asyncHandler(controllers.updateWorkspace));
-workspaceRoutes.delete("/:workspaceId", asyncHandler(controllers.deleteWorkspace));
+workspaceRouter.use(requireAuth);
+
+workspaceRouter.get("/", asyncHandler(WorkspaceController.list));
+workspaceRouter.post("/", asyncHandler(WorkspaceController.create));
+workspaceRouter.get("/:workspaceId", asyncHandler(WorkspaceController.get));
+workspaceRouter.patch("/:workspaceId", asyncHandler(WorkspaceController.update));
+workspaceRouter.delete("/:workspaceId", asyncHandler(WorkspaceController.delete));
