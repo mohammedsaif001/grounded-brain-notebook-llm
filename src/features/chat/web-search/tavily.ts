@@ -70,10 +70,7 @@ export class TavilyClient {
      * @param response - Normalized search response
      * @param startIndex - Number of web results already shown to the model in this reply
      */
-    static formatResultsForPrompt(
-        response: TavilySearchResponse,
-        startIndex = 0,
-    ): string {
+    static formatResultsForPrompt(response: TavilySearchResponse, startIndex = 0): string {
         if (response.results.length === 0) {
             return "No web results were found.";
         }

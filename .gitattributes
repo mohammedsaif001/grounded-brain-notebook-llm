@@ -1,0 +1,8 @@
+# Keep LF line endings in the working tree on every OS so `prettier --check`
+# (endOfLine: "lf") passes on Windows checkouts too.
+* text=auto eol=lf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.pdf binary

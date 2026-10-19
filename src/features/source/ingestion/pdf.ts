@@ -44,9 +44,7 @@ export class PdfExtractor {
         const pdf = await getDocumentProxy(new Uint8Array(arrayBuffer));
         const { totalPages, text } = await extractText(pdf, { mergePages: false });
 
-        const pages = Array.isArray(text)
-            ? text.map((page) => page.trim())
-            : [String(text).trim()];
+        const pages = Array.isArray(text) ? text.map((page) => page.trim()) : [String(text).trim()];
 
         const joined = pages.filter(Boolean).join("\n\n");
 
@@ -77,8 +75,7 @@ export class PdfExtractor {
         try {
             return await this.fromBuffer(await downloadPdf(input.fileUrl));
         } catch (error) {
-            const isUnauthorized =
-                error instanceof Error && error.message.includes("(401)");
+            const isUnauthorized = error instanceof Error && error.message.includes("(401)");
 
             if (!isUnauthorized || !input.publicId) {
                 throw error;
@@ -92,6 +89,7 @@ export class PdfExtractor {
             if (!signedUrl) {
                 throw new Error(
                     "PDF download requires authentication. Add CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET to server/.env, or re-upload the PDF.",
+                    { cause: error },
                 );
             }
 

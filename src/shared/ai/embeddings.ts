@@ -23,8 +23,6 @@ export class EmbeddingClient {
             }),
         );
 
-        return response.data
-            .sort((a, b) => a.index - b.index)
-            .map((item) => item.embedding);
+        return response.data.sort((a, b) => a.index - b.index).map((item) => item.embedding);
     }
 }

@@ -28,10 +28,7 @@ export class CloudinaryStorage {
      *
      * @returns The signed URL, or `null` when API credentials are not configured
      */
-    static getSignedDownloadUrl(
-        publicId: string,
-        resourceType: "raw" | "image" = "raw",
-    ) {
+    static getSignedDownloadUrl(publicId: string, resourceType: "raw" | "image" = "raw") {
         if (!cloudinaryConfig.canSign) {
             return null;
         }
@@ -52,10 +49,7 @@ export class CloudinaryStorage {
      * @returns Upload metadata including secure URL and public id
      * @throws {APIError} ServiceUnavailable when Cloudinary is not configured; BadRequest when the upload is rejected
      */
-    static async uploadPdf(
-        buffer: Buffer,
-        filename: string,
-    ): Promise<CloudinaryUploadResult> {
+    static async uploadPdf(buffer: Buffer, filename: string): Promise<CloudinaryUploadResult> {
         const { cloudName, uploadPreset } = cloudinaryConfig;
 
         if (!cloudName || !uploadPreset) {
@@ -71,10 +65,10 @@ export class CloudinaryStorage {
         form.append("upload_preset", uploadPreset);
         form.append("folder", "grounded_brain_notebook_llm/pdfs");
 
-        const response = await fetch(
-            `https://api.cloudinary.com/v1_1/${cloudName}/raw/upload`,
-            { method: "POST", body: form },
-        );
+        const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/raw/upload`, {
+            method: "POST",
+            body: form,
+        });
 
         const result = (await response.json()) as CloudinaryUploadResponse;
 

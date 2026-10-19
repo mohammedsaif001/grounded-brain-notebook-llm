@@ -29,12 +29,7 @@ export type APIErrorBody = {
     };
 };
 
-function sendSuccess<T>(
-    res: Response,
-    statusCode: number,
-    data: T,
-    message?: string,
-) {
+function sendSuccess<T>(res: Response, statusCode: number, data: T, message?: string) {
     const body: APISuccessBody<T> = {
         success: true,
         data,

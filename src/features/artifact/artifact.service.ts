@@ -1,9 +1,5 @@
-import type { Prisma } from "../../generated/prisma/client.js";
 import { EventPublisher } from "../../jobs/events.js";
-import {
-    ArtifactRepository,
-    type ArtifactRecord,
-} from "./artifact.repository.js";
+import { ArtifactRepository, type ArtifactRecord } from "./artifact.repository.js";
 import { APIError } from "../../shared/http/api-error.js";
 import type { CreateArtifactInput } from "./artifact.validator.js";
 import { ArtifactGenerationService } from "./artifact-generation.service.js";
@@ -118,7 +114,7 @@ export class ArtifactService {
 
             return ArtifactRepository.update(artifactId, {
                 status: "READY",
-                content: content as Prisma.InputJsonValue,
+                content,
                 metadata: {
                     generatedAt: new Date().toISOString(),
                     processingError: undefined,

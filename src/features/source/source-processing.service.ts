@@ -19,10 +19,7 @@ import { TextChunker } from "./ingestion/chunking.js";
 import { EmbeddingClient } from "../../shared/ai/embeddings.js";
 import { PdfExtractor } from "./ingestion/pdf.js";
 import type { VectorMetadata } from "../../config/pinecone.js";
-import {
-    SourceChunkRepository,
-    type SourceChunkRecord,
-} from "./source-chunk.repository.js";
+import { SourceChunkRepository, type SourceChunkRecord } from "./source-chunk.repository.js";
 import { SourceRepository, type SourceRecord } from "./source.repository.js";
 import { VectorRepository } from "../../shared/ai/vector.repository.js";
 
@@ -46,9 +43,7 @@ export type SourceMetadata = {
 
 /** Reads `metadata` as an object, tolerating null or malformed JSON. */
 function readMetadata(metadata: SourceRecord["metadata"]): SourceMetadata {
-    return metadata && typeof metadata === "object" && !Array.isArray(metadata)
-        ? (metadata as SourceMetadata)
-        : {};
+    return metadata && typeof metadata === "object" && !Array.isArray(metadata) ? metadata : {};
 }
 
 export class SourceProcessingService {
@@ -66,8 +61,7 @@ export class SourceProcessingService {
             return;
         }
 
-        const message =
-            error instanceof Error ? error.message : "Source processing failed";
+        const message = error instanceof Error ? error.message : "Source processing failed";
 
         await SourceRepository.update(sourceId, {
             status: "FAILED",
@@ -162,10 +156,7 @@ export class SourceProcessingService {
     }
 
     /** Embeds chunks in batches and builds Pinecone records with retrieval metadata. */
-    private static async buildVectorRecords(
-        source: SourceRecord,
-        chunks: SourceChunkRecord[],
-    ) {
+    private static async buildVectorRecords(source: SourceRecord, chunks: SourceChunkRecord[]) {
         const records: PineconeRecord<VectorMetadata>[] = [];
 
         for (let i = 0; i < chunks.length; i += EMBED_BATCH_SIZE) {
@@ -182,7 +173,7 @@ export class SourceProcessingService {
 
                 records.push({
                     id: chunk.id,
-                    values: embeddings[j]!,
+                    values: embeddings[j],
                     metadata: {
                         workspaceId: source.workspaceId,
                         sourceId: source.id,

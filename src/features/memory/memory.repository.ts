@@ -102,14 +102,11 @@ export class MemoryRepository {
         userId: string,
         input: { memory: string; metadata?: Record<string, unknown> },
     ) {
-        const created = await Mem0Client.get().add(
-            [{ role: "user", content: input.memory }],
-            {
-                userId,
-                infer: false,
-                metadata: input.metadata,
-            },
-        );
+        const created = await Mem0Client.get().add([{ role: "user", content: input.memory }], {
+            userId,
+            infer: false,
+            metadata: input.metadata,
+        });
 
         const first = created[0];
         if (!first) {

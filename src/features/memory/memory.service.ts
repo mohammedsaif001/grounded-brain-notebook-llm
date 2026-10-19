@@ -1,7 +1,4 @@
-import {
-    MemoryRepository,
-    type MemoryMessage,
-} from "./memory.repository.js";
+import { MemoryRepository, type MemoryMessage } from "./memory.repository.js";
 import { APIError } from "../../shared/http/api-error.js";
 
 /** User memory business logic (manual memories plus memories learned from chat). */

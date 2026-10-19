@@ -87,9 +87,7 @@ const reportSchema = z.object({
  */
 function allocateBudgets(lengths: number[], total: number) {
     const budgets = new Array<number>(lengths.length).fill(0);
-    const order = lengths
-        .map((_, index) => index)
-        .sort((a, b) => lengths[a] - lengths[b]);
+    const order = lengths.map((_, index) => index).sort((a, b) => lengths[a] - lengths[b]);
 
     let remaining = total;
     let left = lengths.length;
@@ -123,7 +121,7 @@ async function condenseSource(title: string, content: string, budget: number) {
     }
 
     const targetChars = Math.max(800, Math.floor(budget / segments.length));
-    const notes: string[] = new Array(segments.length);
+    const notes = new Array<string>(segments.length);
 
     for (let i = 0; i < segments.length; i += CONDENSE_CONCURRENCY) {
         const batch = segments.slice(i, i + CONDENSE_CONCURRENCY);
@@ -212,10 +210,7 @@ export class ArtifactGenerationService {
      * @throws {APIError} BadRequest when no ready sources match
      *
      */
-    static async resolveReadySourceIds(
-        workspaceId: string,
-        sourceIds?: string[],
-    ) {
+    static async resolveReadySourceIds(workspaceId: string, sourceIds?: string[]) {
         const sources = await SourceService.listReady(workspaceId);
 
         const selected = sourceIds?.length
@@ -247,10 +242,7 @@ export class ArtifactGenerationService {
      *
      *
      */
-    static async gatherSourceContext(
-        workspaceId: string,
-        sourceIds?: string[],
-    ) {
+    static async gatherSourceContext(workspaceId: string, sourceIds?: string[]) {
         const sources = await SourceService.listReadyWithContent(workspaceId);
 
         const selected = sourceIds?.length
@@ -269,9 +261,7 @@ export class ArtifactGenerationService {
         });
 
         if (withContent.length === 0) {
-            throw APIError.BadRequest(
-                "Selected sources have no extracted content yet.",
-            );
+            throw APIError.BadRequest("Selected sources have no extracted content yet.");
         }
 
         const budgets = allocateBudgets(
@@ -285,11 +275,7 @@ export class ArtifactGenerationService {
                 content:
                     source.content.length <= budgets[index]
                         ? source.content
-                        : await condenseSource(
-                            source.title,
-                            source.content,
-                            budgets[index],
-                        ),
+                        : await condenseSource(source.title, source.content, budgets[index]),
             })),
         );
 
@@ -314,10 +300,7 @@ export class ArtifactGenerationService {
      *
      *
      */
-    static async generateContent(
-        type: ArtifactRecord["type"],
-        sourceText: string,
-    ) {
+    static async generateContent(type: ArtifactRecord["type"], sourceText: string) {
         const system = [
             `You are Grounded-Brain-Notebook, an expert learning assistant generating a ${type.toLowerCase()} from workspace source materials.`,
             "Use ONLY the provided source content. Do not invent facts not supported by the sources.",
@@ -380,7 +363,7 @@ export class ArtifactGenerationService {
                 return result.output;
             }
             default:
-                throw APIError.BadRequest(`Unsupported artifact type: ${type}`);
+                throw APIError.BadRequest(`Unsupported artifact type: ${String(type)}`);
         }
     }
 }

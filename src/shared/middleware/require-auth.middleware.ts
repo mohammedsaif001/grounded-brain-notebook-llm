@@ -13,13 +13,12 @@ declare module "express-serve-static-core" {
 export async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
     const session = await auth.api.getSession({
         headers: fromNodeHeaders(req.headers),
-    })
+    });
 
     if (!session?.user) {
-        throw APIError.Unauthorized('Unauthorized: Please log in to access this resource')
+        throw APIError.Unauthorized("Unauthorized: Please log in to access this resource");
     }
-    
+
     req.session = session;
     next();
- }
-   
+}

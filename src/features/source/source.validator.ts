@@ -1,20 +1,9 @@
 import { z } from "zod";
 import { workspaceIdParamSchema } from "../workspace/workspace.validator.js";
 
-export const sourceTypeSchema = z.enum([
-    "PDF",
-    "WEBSITE",
-    "YOUTUBE",
-    "TEXT",
-    "MARKDOWN",
-]);
+export const sourceTypeSchema = z.enum(["PDF", "WEBSITE", "YOUTUBE", "TEXT", "MARKDOWN"]);
 
-export const sourceStatusSchema = z.enum([
-    "PENDING",
-    "PROCESSING",
-    "READY",
-    "FAILED",
-]);
+export const sourceStatusSchema = z.enum(["PENDING", "PROCESSING", "READY", "FAILED"]);
 
 export const sourceIdParamSchema = workspaceIdParamSchema.extend({
     sourceId: z.string().trim().min(1),
@@ -50,6 +39,11 @@ export const importWebsiteSchema = z.object({
 
 export const importYoutubeSchema = z.object({
     url: z.string().trim().min(1, "YouTube URL is required"),
+    title: z.string().trim().max(200).optional(),
+});
+
+/** Text fields sent alongside the PDF in the multipart upload form. */
+export const uploadPdfBodySchema = z.object({
     title: z.string().trim().max(200).optional(),
 });
 

@@ -17,14 +17,34 @@ sourceRouter.post(
     uploadSinglePdf,
     asyncHandler(SourceController.uploadPdf),
 );
-sourceRouter.post("/import/website", ingestionRateLimiter, asyncHandler(SourceController.importWebsite));
-sourceRouter.post("/import/youtube", ingestionRateLimiter, asyncHandler(SourceController.importYoutube));
-sourceRouter.post("/import/web-search", ingestionRateLimiter, asyncHandler(SourceController.importWebSearch));
+sourceRouter.post(
+    "/import/website",
+    ingestionRateLimiter,
+    asyncHandler(SourceController.importWebsite),
+);
+sourceRouter.post(
+    "/import/youtube",
+    ingestionRateLimiter,
+    asyncHandler(SourceController.importYoutube),
+);
+sourceRouter.post(
+    "/import/web-search",
+    ingestionRateLimiter,
+    asyncHandler(SourceController.importWebSearch),
+);
 
 sourceRouter.post("/bulk-delete", asyncHandler(SourceController.bulkDelete));
-sourceRouter.post("/reprocess", ingestionRateLimiter, asyncHandler(SourceController.reprocessFailed));
+sourceRouter.post(
+    "/reprocess",
+    ingestionRateLimiter,
+    asyncHandler(SourceController.reprocessFailed),
+);
 
 sourceRouter.get("/:sourceId", asyncHandler(SourceController.get));
 sourceRouter.delete("/:sourceId", asyncHandler(SourceController.delete));
 sourceRouter.get("/:sourceId/chunks", asyncHandler(SourceController.getChunks));
-sourceRouter.post("/:sourceId/reprocess", ingestionRateLimiter, asyncHandler(SourceController.reprocess));
+sourceRouter.post(
+    "/:sourceId/reprocess",
+    ingestionRateLimiter,
+    asyncHandler(SourceController.reprocess),
+);

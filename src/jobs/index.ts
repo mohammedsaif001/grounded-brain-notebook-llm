@@ -1,7 +1,17 @@
+import { z } from "zod";
+import { inngest } from "../config/inngest.js";
 import { ArtifactService } from "../features/artifact/artifact.service.js";
 import { ConversationMemoryService } from "../features/conversation/conversation-memory.service.js";
 import { SourceProcessingService } from "../features/source/source-processing.service.js";
-import { inngest } from "../config/inngest.js";
+
+// Event payloads are untyped at the Inngest boundary; validate them before use so a
+// malformed event fails loudly instead of passing `undefined` ids downstream.
+const sourceEventSchema = z.object({ sourceId: z.string().min(1), workspaceId: z.string().min(1) });
+const artifactEventSchema = z.object({ artifactId: z.string().min(1) });
+const conversationEventSchema = z.object({
+    conversationId: z.string().min(1),
+    userId: z.string().min(1),
+});
 
 export const processSource = inngest.createFunction(
     {
@@ -23,11 +33,9 @@ export const processSource = inngest.createFunction(
         ],
     },
     async ({ event, step }) => {
-        const { sourceId } = event.data;
+        const { sourceId } = sourceEventSchema.parse(event.data);
 
-        await step.run("mark-processing", () =>
-            SourceProcessingService.markProcessing(sourceId),
-        );
+        await step.run("mark-processing", () => SourceProcessingService.markProcessing(sourceId));
 
         try {
             const { chunkCount } = await step.run("extract-and-chunk", () =>
@@ -61,7 +69,7 @@ export const generateArtifact = inngest.createFunction(
         ],
     },
     async ({ event, step }) => {
-        const { artifactId } = event.data;
+        const { artifactId } = artifactEventSchema.parse(event.data);
 
         await step.run("generate", async () => {
             await ArtifactService.generate(artifactId);
@@ -80,7 +88,7 @@ export const summarizeConversation = inngest.createFunction(
         concurrency: { key: "event.data.conversationId", limit: 1 },
     },
     async ({ event, step }) => {
-        const { conversationId, userId } = event.data;
+        const { conversationId, userId } = conversationEventSchema.parse(event.data);
 
         await step.run("summarize", async () => {
             await ConversationMemoryService.summarize(conversationId, userId);

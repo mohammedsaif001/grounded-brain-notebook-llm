@@ -14,12 +14,7 @@
 import OpenAI from "openai";
 import PQueue from "p-queue";
 import { createOpenAI } from "@ai-sdk/openai";
-import {
-    APICallError,
-    RetryError,
-    wrapLanguageModel,
-    type LanguageModelMiddleware,
-} from "ai";
+import { APICallError, RetryError, wrapLanguageModel, type LanguageModelMiddleware } from "ai";
 import { APIError } from "../shared/http/api-error.js";
 import { env } from "./env.js";
 

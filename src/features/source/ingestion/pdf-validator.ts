@@ -64,7 +64,10 @@ export class PdfValidator {
                 pdf.getJSActions(),
             ]);
 
-            if ((attachments && attachments.size > 0) || (documentActions && documentActions.size > 0)) {
+            if (
+                (attachments && attachments.size > 0) ||
+                (documentActions && documentActions.size > 0)
+            ) {
                 throw APIError.BadRequest(ACTIVE_CONTENT_MESSAGE);
             }
 
@@ -89,6 +92,7 @@ export class PdfValidator {
         const stem = baseName
             .replace(/\.pdf$/i, "")
             .normalize("NFKC")
+            // eslint-disable-next-line no-control-regex -- stripping control characters is the point
             .replace(/[\u0000-\u001f\u007f]/g, "")
             .replace(/[^\p{L}\p{N} ._()-]/gu, "_")
             .replace(/\s+/g, " ")

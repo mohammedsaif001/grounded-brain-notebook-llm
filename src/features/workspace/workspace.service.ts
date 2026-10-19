@@ -1,14 +1,8 @@
 import { EventPublisher } from "../../jobs/events.js";
-import {
-    WorkspaceRepository,
-    type WorkspaceRecord,
-} from "./workspace.repository.js";
+import { WorkspaceRepository, type WorkspaceRecord } from "./workspace.repository.js";
 import { VectorRepository } from "../../shared/ai/vector.repository.js";
 import { APIError } from "../../shared/http/api-error.js";
-import type {
-    CreateWorkspaceInput,
-    UpdateWorkspaceInput,
-} from "./workspace.validator.js";
+import type { CreateWorkspaceInput, UpdateWorkspaceInput } from "./workspace.validator.js";
 
 /** Workspace business logic. Also the ownership gate used by every workspace-scoped service. */
 export class WorkspaceService {

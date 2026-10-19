@@ -6,7 +6,7 @@ import { workspaceIdParamSchema } from "../workspace/workspace.validator.js";
 
 export class ChatController {
     /** Streams the reply as an AI SDK UI message stream (not the JSON envelope). */
-    static async stream(req: Request, res: Response) {
+    static stream = async (req: Request, res: Response) => {
         const { workspaceId } = workspaceIdParamSchema.parse(req.params);
         const body = chatBodySchema.parse(req.body);
 
@@ -16,5 +16,5 @@ export class ChatController {
             model: body.model,
             webSearch: body.webSearch,
         });
-    }
+    };
 }

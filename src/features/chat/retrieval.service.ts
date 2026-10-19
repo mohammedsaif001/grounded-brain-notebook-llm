@@ -22,10 +22,7 @@ export class RetrievalService {
      * @param userText - Latest user message
      * @returns Standalone query for vector and memory search
      */
-    static async rewriteQuery(
-        history: ConversationTurn[],
-        userText: string,
-    ): Promise<string> {
+    static async rewriteQuery(history: ConversationTurn[], userText: string): Promise<string> {
         if (history.length === 0) {
             return userText;
         }

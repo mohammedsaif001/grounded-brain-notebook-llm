@@ -8,7 +8,6 @@
  * Optional: `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` (Google login), `BETTER_AUTH_URL`, `CLIENT_URL`
  */
 
-
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { env, isProduction } from "./env.js";
@@ -30,13 +29,13 @@ export const auth = betterAuth({
     socialProviders:
         env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
             ? {
-                google: {
-                    clientId: env.GOOGLE_CLIENT_ID,
-                    clientSecret: env.GOOGLE_CLIENT_SECRET,
-                    // Optional: restrict to your domain
-                    // prompt: "select_account",
-                },
-            }
+                  google: {
+                      clientId: env.GOOGLE_CLIENT_ID,
+                      clientSecret: env.GOOGLE_CLIENT_SECRET,
+                      // Optional: restrict to your domain
+                      // prompt: "select_account",
+                  },
+              }
             : {},
     emailAndPassword: {
         // Dev/testing convenience. Turned OFF when NODE_ENV=production.

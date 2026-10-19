@@ -1,4 +1,4 @@
-import { Prisma } from "../../generated/prisma/client.js";
+import type { Prisma } from "../../generated/prisma/client.js";
 import prisma from "../../config/db.js";
 import type { ListSourcesQuery } from "./source.validator.js";
 
@@ -97,10 +97,7 @@ export class SourceRepository {
     }
 
     /** Lists sources including full `content`; only for callers that need the text. */
-    static findAllWithContentByWorkspaceId(
-        workspaceId: string,
-        filters: ListSourcesQuery = {},
-    ) {
+    static findAllWithContentByWorkspaceId(workspaceId: string, filters: ListSourcesQuery = {}) {
         return prisma.source.findMany({
             where: buildSourcesWhere(workspaceId, filters),
             select: sourceSelect,

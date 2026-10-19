@@ -1,20 +1,17 @@
 import type { Request, Response } from "express";
 import { ConversationService } from "./conversation.service.js";
 import { APIResponse } from "../../shared/http/api-response.js";
-import {
-    conversationIdParamSchema,
-    createConversationSchema,
-} from "./conversation.validator.js";
+import { conversationIdParamSchema, createConversationSchema } from "./conversation.validator.js";
 import { workspaceIdParamSchema } from "../workspace/workspace.validator.js";
 
 export class ConversationController {
-    static async list(req: Request, res: Response) {
+    static list = async (req: Request, res: Response) => {
         const { workspaceId } = workspaceIdParamSchema.parse(req.params);
         const conversations = await ConversationService.list(workspaceId, req.session.user.id);
         APIResponse.Ok(res, conversations);
-    }
+    };
 
-    static async create(req: Request, res: Response) {
+    static create = async (req: Request, res: Response) => {
         const { workspaceId } = workspaceIdParamSchema.parse(req.params);
         const input = createConversationSchema.parse(req.body ?? {});
         const conversation = await ConversationService.create(
@@ -23,9 +20,9 @@ export class ConversationController {
             input.title,
         );
         APIResponse.Created(res, conversation);
-    }
+    };
 
-    static async listMessages(req: Request, res: Response) {
+    static listMessages = async (req: Request, res: Response) => {
         const { workspaceId, conversationId } = conversationIdParamSchema.parse(req.params);
         const messages = await ConversationService.listMessages(
             workspaceId,
@@ -33,11 +30,11 @@ export class ConversationController {
             req.session.user.id,
         );
         APIResponse.Ok(res, messages);
-    }
+    };
 
-    static async delete(req: Request, res: Response) {
+    static delete = async (req: Request, res: Response) => {
         const { workspaceId, conversationId } = conversationIdParamSchema.parse(req.params);
         await ConversationService.delete(workspaceId, conversationId, req.session.user.id);
         APIResponse.NoContent(res);
-    }
+    };
 }

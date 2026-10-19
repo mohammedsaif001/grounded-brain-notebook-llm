@@ -1,0 +1,13 @@
+# Build output and dependencies
+dist
+node_modules
+
+# Generated code
+src/generated
+
+# Prisma migrations are generated SQL; never reformat applied migrations
+prisma/migrations
+
+# Lockfile and exported API collection are tool-managed
+package-lock.json
+*.postman_collection.json

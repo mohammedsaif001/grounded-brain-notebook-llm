@@ -25,7 +25,10 @@ export class YoutubeClient {
 
         try {
             const segments = await YoutubeTranscript.fetchTranscript(videoId);
-            const content = segments.map((segment) => segment.text).join(" ").trim();
+            const content = segments
+                .map((segment) => segment.text)
+                .join(" ")
+                .trim();
 
             if (!content) {
                 throw APIError.BadRequest("No transcript found for this video");

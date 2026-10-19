@@ -11,10 +11,7 @@ const UPSERT_BATCH_SIZE = 100;
  */
 export class VectorRepository {
     /** Upserts vectors into a workspace namespace in batches. */
-    static async upsert(
-        workspaceId: string,
-        records: PineconeRecord<VectorMetadata>[],
-    ) {
+    static async upsert(workspaceId: string, records: PineconeRecord<VectorMetadata>[]) {
         if (records.length === 0) {
             return;
         }

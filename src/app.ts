@@ -6,7 +6,7 @@
  */
 
 import cors from "cors";
-import express from "express";
+import express, { type RequestHandler } from "express";
 import { toNodeHandler } from "better-auth/node";
 import { serve } from "inngest/express";
 import { auth } from "./config/auth.js";
@@ -32,10 +32,12 @@ if (env.TRUST_PROXY_HOPS > 0) {
     app.set("trust proxy", env.TRUST_PROXY_HOPS);
 }
 
-app.use(cors({
-    origin: env.CLIENT_URL,
-    credentials: true,
-}));
+app.use(
+    cors({
+        origin: env.CLIENT_URL,
+        credentials: true,
+    }),
+);
 
 // Applied before auth so login attempts are rate limited too.
 app.use("/api", apiRateLimiter);
@@ -48,7 +50,8 @@ app.all("/api/auth/{*any}", toNodeHandler(auth));
 app.use(express.json({ limit: BODY_LIMIT }));
 app.use(express.urlencoded({ extended: true, limit: BODY_LIMIT }));
 
-app.use("/api/inngest", serve({ client: inngest, functions }));
+// `serve` is typed as `any` upstream; it is a standard Express handler.
+app.use("/api/inngest", serve({ client: inngest, functions }) as RequestHandler);
 
 app.get("/", (_req, res) => {
     APIResponse.Ok(res, null, "Hello from Grounded Notebook API");

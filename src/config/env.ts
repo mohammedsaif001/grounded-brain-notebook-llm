@@ -15,8 +15,7 @@ import { z } from "zod";
 /** Treats empty or whitespace-only values (e.g. `FOO=` in .env) as unset. */
 const optional = <T extends z.ZodType>(schema: T) =>
     z.preprocess(
-        (value) =>
-            typeof value === "string" && value.trim() === "" ? undefined : value,
+        (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
         schema.optional(),
     );
 
@@ -24,9 +23,7 @@ const optionalString = optional(z.string().trim());
 
 const envSchema = z
     .object({
-        NODE_ENV: z
-            .enum(["development", "test", "production"])
-            .default("development"),
+        NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
         PORT: z.coerce.number().int().positive().default(8080),
         CLIENT_URL: z.url().default("http://localhost:3000"),
         // Number of reverse proxies in front of the app (load balancer, CDN). Needed so
@@ -76,21 +73,14 @@ const envSchema = z
             }
         };
 
-        requireTogether(
-            ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"],
-            "Google OAuth",
-        );
-        requireTogether(
-            ["CLOUDINARY_CLOUD_NAME", "CLOUDINARY_UPLOAD_PRESET"],
-            "PDF uploads",
-        );
+        requireTogether(["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"], "Google OAuth");
+        requireTogether(["CLOUDINARY_CLOUD_NAME", "CLOUDINARY_UPLOAD_PRESET"], "PDF uploads");
         requireTogether(
             ["CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET"],
             "signed Cloudinary downloads",
         );
 
-        const inngestDev =
-            value.INNGEST_DEV === "1" || value.INNGEST_DEV === "true";
+        const inngestDev = value.INNGEST_DEV === "1" || value.INNGEST_DEV === "true";
 
         if (value.NODE_ENV === "production" && !inngestDev) {
             for (const key of ["INNGEST_EVENT_KEY", "INNGEST_SIGNING_KEY"] as const) {
@@ -109,9 +99,7 @@ const envSchema = z
 const parsed = envSchema.safeParse(process.env);
 
 if (!parsed.success) {
-    console.error(
-        `Invalid environment configuration:\n${z.prettifyError(parsed.error)}`,
-    );
+    console.error(`Invalid environment configuration:\n${z.prettifyError(parsed.error)}`);
     process.exit(1);
 }
 

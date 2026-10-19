@@ -1,4 +1,3 @@
-
 export type TextChunk = {
     index: number;
     content: string;
@@ -35,15 +34,10 @@ const SEPARATORS = ["\n\n", "\n", ". ", " ", ""];
  * @returns An array of merged chunk strings
  *
  */
-function mergeSplits(
-    splits: string[],
-    separator: string,
-    chunkSize: number,
-    chunkOverlap: number,
-) {
+function mergeSplits(splits: string[], separator: string, chunkSize: number, chunkOverlap: number) {
     const docs: string[] = [];
     const sepLen = separator.length;
-    let current: string[] = [];
+    const current: string[] = [];
     // Length of `current.join(separator)`.
     let total = 0;
 
@@ -57,8 +51,7 @@ function mergeSplits(
             // budget and leaves room for the incoming split.
             while (
                 current.length > 0 &&
-                (total > chunkOverlap ||
-                    (total > 0 && total + sepLen + len > chunkSize))
+                (total > chunkOverlap || (total > 0 && total + sepLen + len > chunkSize))
             ) {
                 total -= current[0].length + (current.length > 1 ? sepLen : 0);
                 current.shift();

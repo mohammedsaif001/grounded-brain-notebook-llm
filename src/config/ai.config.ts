@@ -1,4 +1,3 @@
-
 /** Default chat model when the client or workspace does not specify one. */
 export const CHAT_MODEL = "gpt-4o-mini";
 

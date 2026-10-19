@@ -13,9 +13,7 @@ import type { RetrievedChunk } from "./chat.types.js";
  * @returns Text safe to embed inside a delimited block
  */
 function escapeDelimiters(text: string) {
-    return text.replace(/<\/?(sources|source|memories)\b/gi, (match) =>
-        match.replace("<", "&lt;"),
-    );
+    return text.replace(/<\/?(sources|source|memories)\b/gi, (match) => match.replace("<", "&lt;"));
 }
 
 export class ChatPrompt {

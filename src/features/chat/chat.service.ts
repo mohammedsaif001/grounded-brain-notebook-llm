@@ -52,7 +52,6 @@ export type ChatInput = {
 };
 
 export class ChatService {
-
     /**
      * Keeps only the sources and web results the answer actually cites.
      * `marker` is the number used in the text (`[n]` for sources, `[Wn]` for web results).
@@ -66,29 +65,33 @@ export class ChatService {
 
         const sourceCitations = retrievedChunks.flatMap((chunk, index) =>
             cited.sources.has(index + 1)
-                ? [{
-                    marker: index + 1,
-                    sourceId: chunk.sourceId,
-                    sourceTitle: chunk.sourceTitle,
-                    sourceType: chunk.sourceType,
-                    chunkId: chunk.chunkId,
-                    chunkIndex: chunk.chunkIndex,
-                    page: chunk.page,
-                    excerpt: chunk.text.slice(0, 280),
-                    score: chunk.score,
-                }]
+                ? [
+                      {
+                          marker: index + 1,
+                          sourceId: chunk.sourceId,
+                          sourceTitle: chunk.sourceTitle,
+                          sourceType: chunk.sourceType,
+                          chunkId: chunk.chunkId,
+                          chunkIndex: chunk.chunkIndex,
+                          page: chunk.page,
+                          excerpt: chunk.text.slice(0, 280),
+                          score: chunk.score,
+                      },
+                  ]
                 : [],
         );
 
         const webCitations = webResults.flatMap((result, index) =>
             cited.web.has(index + 1)
-                ? [{
-                    marker: index + 1,
-                    sourceType: "WEB" as const,
-                    sourceTitle: result.title,
-                    url: result.url,
-                    excerpt: result.content.slice(0, 280),
-                }]
+                ? [
+                      {
+                          marker: index + 1,
+                          sourceType: "WEB" as const,
+                          sourceTitle: result.title,
+                          url: result.url,
+                          excerpt: result.content.slice(0, 280),
+                      },
+                  ]
                 : [],
         );
 
@@ -109,8 +112,7 @@ export class ChatService {
     static async stream(res: Response, workspaceId: string, userId: string, input: ChatInput) {
         const workspace = await WorkspaceService.getForUser(workspaceId, userId);
         const requestedModel = input.model ?? workspace.defaultModel;
-        const chatModel =
-            CHAT_MODELS.find((model) => model === requestedModel) ?? CHAT_MODEL;
+        const chatModel = CHAT_MODELS.find((model) => model === requestedModel) ?? CHAT_MODEL;
         const webSearchEnabled = input.webSearch === true && TavilyClient.isConfigured();
 
         const userText = UIMessageUtils.getLastUserText(input.messages);
@@ -181,25 +183,25 @@ export class ChatService {
                 console.error("Chat stream failed:", error);
                 return "Something went wrong while generating a reply. Please try again.";
             },
-            execute: async ({ writer }) => {
+            execute: ({ writer }) => {
                 const tools = webSearchEnabled
                     ? {
-                        web_search: tool({
-                            description:
-                                "Search the web for up-to-date information outside the workspace sources.",
-                            inputSchema: z.object({
-                                query: z
-                                    .string()
-                                    .describe("The search query for current web information"),
-                            }),
-                            execute: async ({ query }) => {
-                                const response = await TavilyClient.search(query);
-                                const startIndex = webResults.length;
-                                webResults.push(...response.results);
-                                return TavilyClient.formatResultsForPrompt(response, startIndex);
-                            },
-                        }),
-                    }
+                          web_search: tool({
+                              description:
+                                  "Search the web for up-to-date information outside the workspace sources.",
+                              inputSchema: z.object({
+                                  query: z
+                                      .string()
+                                      .describe("The search query for current web information"),
+                              }),
+                              execute: async ({ query }) => {
+                                  const response = await TavilyClient.search(query);
+                                  const startIndex = webResults.length;
+                                  webResults.push(...response.results);
+                                  return TavilyClient.formatResultsForPrompt(response, startIndex);
+                              },
+                          }),
+                      }
                     : undefined;
 
                 const result = streamText({

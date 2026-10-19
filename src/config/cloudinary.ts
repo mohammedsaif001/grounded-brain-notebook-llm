@@ -14,11 +14,7 @@ export const cloudinaryConfig = {
     /** Unsigned PDF uploads are possible. */
     canUpload: !!(env.CLOUDINARY_CLOUD_NAME && env.CLOUDINARY_UPLOAD_PRESET),
     /** Signed download URLs are possible. */
-    canSign: !!(
-        env.CLOUDINARY_CLOUD_NAME &&
-        env.CLOUDINARY_API_KEY &&
-        env.CLOUDINARY_API_SECRET
-    ),
+    canSign: !!(env.CLOUDINARY_CLOUD_NAME && env.CLOUDINARY_API_KEY && env.CLOUDINARY_API_SECRET),
 } as const;
 
 if (cloudinaryConfig.canSign) {

@@ -1,9 +1,6 @@
 import { APIError } from "../../shared/http/api-error.js";
 import { WorkspaceService } from "../workspace/workspace.service.js";
-import {
-    ConversationRepository,
-    type ConversationRecord,
-} from "./conversation.repository.js";
+import { ConversationRepository, type ConversationRecord } from "./conversation.repository.js";
 import type { ConversationTurn } from "./conversation.types.js";
 import { MessageRepository, type CreateMessageData } from "./message.repository.js";
 

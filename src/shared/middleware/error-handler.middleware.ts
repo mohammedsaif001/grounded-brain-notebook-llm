@@ -16,10 +16,7 @@ function toAPIError(error: unknown): APIError {
     }
 
     if (error instanceof ZodError) {
-        return APIError.Validation(
-            "Validation failed",
-            flattenError(error).fieldErrors,
-        );
+        return APIError.Validation("Validation failed", flattenError(error).fieldErrors);
     }
 
     if (error instanceof multer.MulterError) {
@@ -47,10 +44,7 @@ function toAPIError(error: unknown): APIError {
         http_code?: number;
         name?: string;
     };
-    if (
-        cloudinaryError.name === "UnexpectedResponse" &&
-        cloudinaryError.http_code === 403
-    ) {
+    if (cloudinaryError.name === "UnexpectedResponse" && cloudinaryError.http_code === 403) {
         return APIError.BadRequest(
             "Cloudinary upload rejected: your API key is missing Upload (create) permission. In Cloudinary Dashboard → Settings → API Keys, use the root secret or create a key with Upload enabled.",
         );
@@ -60,12 +54,7 @@ function toAPIError(error: unknown): APIError {
     return APIError.Internal();
 }
 
-export function errorHandler(
-    error: unknown,
-    _req: Request,
-    res: Response,
-    next: NextFunction,
-) {
+export function errorHandler(error: unknown, _req: Request, res: Response, next: NextFunction) {
     // A streaming response (e.g. chat) has already started; let Express close the connection.
     if (res.headersSent) {
         next(error);
