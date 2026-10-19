@@ -8,7 +8,7 @@ import { uploadPdfToCloudinary } from "../lib/cloudinary.js";
 import { extractPdfFromBuffer } from "../lib/pdf.js";
 import { scrapeWebsite } from "../lib/firecrawl.js";
 import { fetchYoutubeTranscript } from "../lib/youtube.js";
-import { enqueueSourceProcessing } from "../lib/source-events.js";
+import { emitSourceDeleted, enqueueSourceProcessing } from "../lib/source-events.js";
 import { listChunksForSource, removeSourceFromIndex } from "./source-processing.service.js";
 import { Prisma } from "../generated/prisma/client.js";
 
@@ -118,6 +118,7 @@ export async function deleteSourceForWorkspace(
     userId: string,
 ) {
     await getSourceForWorkspace(workspaceId, sourceId, userId);
+    await emitSourceDeleted({ sourceId, workspaceId });
     await removeSourceFromIndex(workspaceId, sourceId);
     await deleteSourceRecord(sourceId);
 }

@@ -20,7 +20,9 @@ app.use(cors({
 }))
 
 app.all("/api/auth/{*any}", toNodeHandler(auth));
-app.use(express.json());
+// Chat only needs the latest message (history is loaded server-side), but clients using
+// `useChat` defaults still send the full history, so allow headroom above the 100kb default.
+app.use(express.json({ limit: "2mb" }));
 
 app.use("/api/inngest", serve({ client: inngest, functions }));
 

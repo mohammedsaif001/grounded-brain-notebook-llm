@@ -9,11 +9,16 @@ import {
 import { findMessagesByConversationId } from "../repositories/message.repository.js";
 import { NotFoundError } from "../types/app-error.js";
 
+/** Upper bound on messages sent to Mem0 for extraction in one summary run. */
+const MAX_MEMORY_EXTRACTION_MESSAGES = 16;
+
 /**
- * Generates a rolling conversation summary and syncs recent learnings to Mem0.
+ * Incrementally updates a conversation's rolling summary and syncs new learnings to Mem0.
  *
- * Called asynchronously (via Inngest) every N messages. The summary replaces
- * older history in chat context; Mem0 receives the last 16 messages for extraction.
+ * Called asynchronously (via Inngest) every N messages. Only messages added since the
+ * last summary (`summaryMessageCount`) are sent to the model, together with the previous
+ * summary, so cost stays flat as the conversation grows. The same new messages are sent
+ * to Mem0 for memory extraction; this is the only place chat memories are learned.
  *
  * @param conversationId - Conversation to summarize
  * @param userId - Owner of the conversation (used for Mem0)
@@ -33,12 +38,13 @@ export async function summarizeConversationById(
     }
 
     const messages = await findMessagesByConversationId(conversationId);
+    const newMessages = messages.slice(conversation.summaryMessageCount);
 
-    if (messages.length === 0) {
+    if (newMessages.length === 0) {
         return conversation;
     }
 
-    const transcript = messages
+    const transcript = newMessages
         .map((message) => `${message.role}: ${message.content}`)
         .join("\n\n");
     const previousSummary = conversation.summary?.trim();
@@ -55,10 +61,14 @@ export async function summarizeConversationById(
             previousSummary
                 ? `Previous summary:\n${previousSummary}\n`
                 : null,
-            "Full conversation transcript:",
+            previousSummary
+                ? "New messages since the previous summary:"
+                : "Conversation transcript:",
             transcript,
             "",
-            "Write an updated summary that incorporates new messages.",
+            previousSummary
+                ? "Write an updated summary that merges the previous summary with the new messages."
+                : "Write a summary of the conversation.",
         ]
             .filter(Boolean)
             .join("\n"),
@@ -69,12 +79,14 @@ export async function summarizeConversationById(
         summaryMessageCount: messages.length,
     });
 
-    const recentMessages = messages.slice(-16).map((message) => ({
-        role: message.role.toLowerCase() as "user" | "assistant",
-        content: message.content,
-    }));
+    const memoryMessages = newMessages
+        .slice(-MAX_MEMORY_EXTRACTION_MESSAGES)
+        .map((message) => ({
+            role: message.role.toLowerCase() as "user" | "assistant",
+            content: message.content,
+        }));
 
-    await addMemoriesFromMessages(userId, recentMessages, {
+    await addMemoriesFromMessages(userId, memoryMessages, {
         source: "learned",
         conversationId,
     });

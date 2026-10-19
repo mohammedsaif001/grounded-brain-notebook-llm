@@ -6,10 +6,12 @@
  * ```
  * User message
  *   → save to DB
+ *   → load recent history from DB
+ *   → rewrite follow-up into standalone query
  *   → RAG retrieval + Mem0 memories
  *   → streamText (AI SDK) with optional web search tool
- *   → save assistant reply + citations
- *   → optional summary job + Mem0 learning
+ *   → save assistant reply + cited sources
+ *   → summary job (which also feeds Mem0) every N messages
  * ```
  */
 
@@ -17,24 +19,29 @@ import { openai } from "@ai-sdk/openai";
 import type { Response } from "express";
 import { z } from "zod";
 import {
-    convertToModelMessages,
     createUIMessageStream,
     isStepCount,
     pipeUIMessageStreamToResponse,
     streamText,
     toUIMessageStream,
     tool,
+    type ModelMessage,
     type UIMessage,
 } from "ai";
 import {
     CHAT_MODEL,
     CHAT_MODELS,
     CONVERSATION_SUMMARY_INTERVAL,
+    QUERY_REWRITE_WINDOW,
     RECENT_MESSAGE_WINDOW,
 } from "../lib/ai-config.js";
 import {
     buildChatSystemPrompt,
+    buildUserPromptWithContext,
+    extractCitationMarkers,
     retrieveWorkspaceContext,
+    rewriteQueryForRetrieval,
+    type ConversationTurn,
 } from "../lib/rag/retrieve.js";
 import {
     createConversationRecord,
@@ -48,6 +55,7 @@ import {
     createMessageRecord,
     countMessagesByConversationId,
     findMessagesByConversationId,
+    findRecentMessagesByConversationId,
 } from "../repositories/message.repository.js";
 
 import { NotFoundError, ValidationError } from "../types/app-error.js";
@@ -60,9 +68,9 @@ import { getWorkspaceByIdForUser } from "./workspace.service.js";
 import {
     formatTavilyResultsForPrompt,
     searchWeb,
-    type TavilySearchResponse,
+    type TavilySearchResult,
 } from "../lib/tavily.js";
-import { addMemoriesFromMessages, searchUserMemories } from "../lib/mem0.js";
+import { searchUserMemories } from "../lib/mem0.js";
 import { enqueueConversationSummarize } from "../lib/conversation-events.js";
 
 /**
@@ -196,14 +204,41 @@ async function resolveConversation(
 }
 
 /**
+ * Loads recent persisted turns for the model.
+ *
+ * History is read from Postgres rather than trusted from the client payload, so a client
+ * cannot inject fabricated assistant turns and the request body stays small no matter how
+ * long the conversation gets. Older turns are covered by the rolling summary.
+ *
+ * @param conversationId - Conversation to load
+ * @returns Recent turns, oldest first (includes the just-saved user message)
+ *
+ */
+async function loadRecentTurns(conversationId: string): Promise<ConversationTurn[]> {
+    const messages = await findRecentMessagesByConversationId(
+        conversationId,
+        RECENT_MESSAGE_WINDOW,
+    );
+
+    return messages.map((message) => ({
+        role: message.role === "USER" ? "user" : "assistant",
+        content: message.content,
+    }));
+}
+
+/**
  * Main RAG chat endpoint: streams an AI reply with workspace context and optional web search.
  *
  * **Pipeline:**
  * 1. Validate user message and resolve/create conversation
- * 2. Save user message to Postgres
- * 3. Parallel: Pinecone RAG retrieval + Mem0 memory search
- * 4. Build system prompt and stream model response via AI SDK
- * 5. On finish: save assistant message, citations, title, summary job, Mem0 learning
+ * 2. Save user message to Postgres and load recent history from Postgres
+ * 3. Rewrite the message into a standalone query (follow-ups only)
+ * 4. Parallel: Pinecone RAG retrieval + Mem0 memory search
+ * 5. Stream model response via AI SDK; sources go in the user turn, not the system prompt
+ * 6. On finish: save assistant message with the citations it actually used, title, summary job
+ *
+ * Only the latest user message from `input.messages` is used; earlier messages in the
+ * payload are ignored in favour of the persisted history.
  *
  * @param res - Express response (streamed via `pipeUIMessageStreamToResponse`)
  * @param workspaceId - Workspace whose sources to search
@@ -250,35 +285,36 @@ export async function streamWorkspaceChat(
         content: userText,
     });
 
+    const recentTurns = await loadRecentTurns(conversation.id);
+    const priorTurns = recentTurns.slice(0, -1);
+
+    const retrievalQuery = await rewriteQueryForRetrieval(
+        priorTurns.slice(-QUERY_REWRITE_WINDOW),
+        userText,
+    );
+
     const [retrievedChunks, userMemories] = await Promise.all([
-        retrieveWorkspaceContext(workspaceId, userText),
-        searchUserMemories(userId, userText),
+        retrieveWorkspaceContext(workspaceId, retrievalQuery),
+        searchUserMemories(userId, retrievalQuery),
     ]);
 
-    const citations = retrievedChunks.map((chunk) => ({
-        sourceId: chunk.sourceId,
-        sourceTitle: chunk.sourceTitle,
-        sourceType: chunk.sourceType,
-        chunkId: chunk.chunkId,
-        chunkIndex: chunk.chunkIndex,
-        page: chunk.page,
-        excerpt: chunk.text.slice(0, 280),
-        score: chunk.score,
-    }));
     const systemPrompt = buildChatSystemPrompt({
-        chunks: retrievedChunks,
+        hasSourceContext: retrievedChunks.length > 0,
         conversationSummary: conversation.summary,
         userMemories: userMemories.map((memory) => memory.memory),
         webSearchEnabled,
     });
 
-    const contextMessages =
-        conversation.summary &&
-            input.messages.length > RECENT_MESSAGE_WINDOW
-            ? input.messages.slice(-RECENT_MESSAGE_WINDOW)
-            : input.messages;
+    const modelMessages: ModelMessage[] = [
+        ...priorTurns,
+        {
+            role: "user",
+            content: buildUserPromptWithContext(retrievedChunks, userText),
+        },
+    ];
 
-    let webSearchResults: TavilySearchResponse | null = null;
+    // Accumulated across every web_search call in this reply so [W#] labels stay unique.
+    const webResults: TavilySearchResult[] = [];
 
     const stream = createUIMessageStream({
         originalMessages: input.messages,
@@ -297,9 +333,10 @@ export async function streamWorkspaceChat(
                                     ),
                             }),
                             execute: async ({ query }) => {
-                                const results = await searchWeb(query);
-                                webSearchResults = results;
-                                return formatTavilyResultsForPrompt(results);
+                                const response = await searchWeb(query);
+                                const startIndex = webResults.length;
+                                webResults.push(...response.results);
+                                return formatTavilyResultsForPrompt(response, startIndex);
                             },
                         }),
                     }
@@ -308,7 +345,7 @@ export async function streamWorkspaceChat(
             const result = streamText({
                 model: openai(chatModel),
                 system: systemPrompt,
-                messages: await convertToModelMessages(contextMessages),
+                messages: modelMessages,
                 tools,
                 stopWhen: webSearchEnabled ? isStepCount(3) : undefined,
             });
@@ -325,21 +362,43 @@ export async function streamWorkspaceChat(
                 return;
             }
 
-            const webCitations = webSearchResults
-                ? webSearchResults.results.map((result) => ({
-                    sourceType: "WEB" as const,
-                    sourceTitle: result.title,
-                    url: result.url,
-                    excerpt: result.content.slice(0, 280),
-                }))
-                : [];
-            const allCitations = [...citations, ...webCitations];
+            // Persist only what the answer actually cites; `marker` is the number used
+            // in the text ([n] for sources, [Wn] for web results).
+            const cited = extractCitationMarkers(assistantText);
+
+            const sourceCitations = retrievedChunks.flatMap((chunk, index) =>
+                cited.sources.has(index + 1)
+                    ? [{
+                        marker: index + 1,
+                        sourceId: chunk.sourceId,
+                        sourceTitle: chunk.sourceTitle,
+                        sourceType: chunk.sourceType,
+                        chunkId: chunk.chunkId,
+                        chunkIndex: chunk.chunkIndex,
+                        page: chunk.page,
+                        excerpt: chunk.text.slice(0, 280),
+                        score: chunk.score,
+                    }]
+                    : [],
+            );
+
+            const webCitations = webResults.flatMap((result, index) =>
+                cited.web.has(index + 1)
+                    ? [{
+                        marker: index + 1,
+                        sourceType: "WEB" as const,
+                        sourceTitle: result.title,
+                        url: result.url,
+                        excerpt: result.content.slice(0, 280),
+                    }]
+                    : [],
+            );
 
             await createMessageRecord({
                 conversationId: conversation.id,
                 role: "ASSISTANT",
                 content: assistantText,
-                citations: allCitations,
+                citations: [...sourceCitations, ...webCitations],
             });
 
             await touchConversation(conversation.id);
@@ -350,30 +409,23 @@ export async function streamWorkspaceChat(
                 });
             }
 
+            // Compare against what the last summary covered rather than using a modulo,
+            // so an aborted turn (user message saved, no reply) can't shift the count
+            // off the interval and stop summaries forever.
             const messageCount = await countMessagesByConversationId(
                 conversation.id,
             );
 
-            if (messageCount % CONVERSATION_SUMMARY_INTERVAL === 0) {
+            if (
+                messageCount - conversation.summaryMessageCount >=
+                CONVERSATION_SUMMARY_INTERVAL
+            ) {
                 await enqueueConversationSummarize({
                     conversationId: conversation.id,
                     userId,
+                    messageCount,
                 });
             }
-
-            void addMemoriesFromMessages(
-                userId,
-                [
-                    { role: "user", content: userText },
-                    { role: "assistant", content: assistantText },
-                ],
-                {
-                    source: "learned",
-                    conversationId: conversation.id,
-                },
-            ).catch((error) => {
-                console.error("Mem0 add failed:", error);
-            });
         },
     });
 

@@ -29,6 +29,20 @@ export function findMessagesByConversationId(conversationId: string) {
     });
 }
 
+export async function findRecentMessagesByConversationId(
+    conversationId: string,
+    limit: number,
+) {
+    const messages = await prisma.message.findMany({
+        where: { conversationId },
+        select: messageSelect,
+        orderBy: { createdAt: "desc" },
+        take: limit,
+    });
+
+    return messages.reverse();
+}
+
 export function countMessagesByConversationId(conversationId: string) {
     return prisma.message.count({
         where: { conversationId },

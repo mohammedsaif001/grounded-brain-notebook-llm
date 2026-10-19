@@ -1,4 +1,5 @@
 import { deleteWorkspaceVectors } from "../lib/pinecone.js";
+import { emitWorkspaceDeleted } from "../lib/source-events.js";
 import {
     type WorkspaceRecord,
 } from "../repositories/workspace.repository.js";
@@ -94,6 +95,7 @@ export async function deleteWorkspaceForUser(
     userId: string,
 ) {
     await getWorkspaceByIdForUser(workspaceId, userId);
+    await emitWorkspaceDeleted({ workspaceId });
 
     try {
         await deleteWorkspaceVectors(workspaceId);

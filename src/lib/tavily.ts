@@ -58,14 +58,18 @@ export async function searchWeb(query: string): Promise<TavilySearchResponse> {
  * Formats Tavily results into a prompt block for the chat model.
  *
  * Results are labeled `[W1]`, `[W2]`, etc. for inline citation in assistant replies.
+ * Numbering continues from `startIndex` so labels stay unique across multiple searches
+ * in the same reply.
  *
  * @param response - Normalized Tavily search response
+ * @param startIndex - Number of web results already shown to the model in this reply
  * @returns Multi-line string injected into the tool result
  *
  *
  */
 export function formatTavilyResultsForPrompt(
     response: TavilySearchResponse,
+    startIndex = 0,
 ): string {
     if (response.results.length === 0) {
         return "No web results were found.";
@@ -73,7 +77,7 @@ export function formatTavilyResultsForPrompt(
 
     const blocks = response.results.map(
         (result, index) =>
-            `[W${index + 1}] ${result.title} (${result.url})\n${result.content}`,
+            `[W${startIndex + index + 1}] ${result.title} (${result.url})\n${result.content}`,
     );
 
     const parts = ["Web search results:"];

@@ -210,7 +210,7 @@ export async function chunkSourceContent(
  *
  * - Sends chunk text to OpenAI in batches of 50
  * - Builds Pinecone records with embedding + searchable metadata
- * - Upserts vectors into the workspace namespace
+ * - Replaces the source's vectors in the workspace namespace (stale vectors are deleted first)
  * - Marks source as `READY` with `chunkCount` and `indexedAt`
  *
  * Pinecone metadata includes enough context for retrieval without re-querying Postgres:
@@ -218,7 +218,7 @@ export async function chunkSourceContent(
  *
  * @param source - The parent source record
  * @param chunks - Chunk rows already saved in Postgres (must have `id`)
- * @returns Updated source record with status `READY`
+ * @returns Updated source record with status `READY`, or `null` if the source was deleted mid-run
  *
  *
  */
@@ -262,7 +262,16 @@ export async function embedAndIndexSource(
         }
     }
 
+    // Clear vectors from any earlier run first: chunk ids are regenerated on every
+    // run, so upserting alone would leave the previous run's vectors orphaned.
+    await deleteSourceVectors(source.workspaceId, source.id);
     await upsertSourceVectors(source.workspaceId, records);
+
+    // The source may have been deleted while we were embedding; don't leave its vectors behind.
+    if (!(await findSourceById(source.id))) {
+        await deleteSourceVectors(source.workspaceId, source.id);
+        return null;
+    }
 
     const metadata =
         source.metadata &&

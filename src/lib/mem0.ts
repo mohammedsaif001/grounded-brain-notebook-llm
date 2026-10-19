@@ -1,4 +1,5 @@
-import { MemoryClient } from "mem0ai";
+import { MemoryClient, MemoryNotFoundError } from "mem0ai";
+import { MEMORY_SEARCH_MIN_SCORE, MEMORY_SEARCH_TOP_K } from "./ai-config.js";
 
 let client: MemoryClient | null = null;
 
@@ -100,7 +101,7 @@ export async function listUserMemories(userId: string) {
  *
  * @param userId - Authenticated user's id
  * @param query - Current user message or search text
- * @returns Top matching memories (up to 8), or `[]` when Mem0 is off or query is empty
+ * @returns Top matching memories above {@link MEMORY_SEARCH_MIN_SCORE}, or `[]` when Mem0 is off or query is empty
  *
  */
 export async function searchUserMemories(userId: string, query: string) {
@@ -110,8 +111,8 @@ export async function searchUserMemories(userId: string, query: string) {
 
     const results = await getMem0Client().search(query, {
         filters: { user_id: userId },
-        topK: 8,
-        threshold: 0.1,
+        topK: MEMORY_SEARCH_TOP_K,
+        threshold: MEMORY_SEARCH_MIN_SCORE,
     });
 
     return results.results.map(mapMemory);
@@ -176,6 +177,25 @@ export async function addMemoriesFromMessages(
     });
 }
 
+
+/**
+ * Fetches a single memory along with the id of the user who owns it.
+ *
+ * @param memoryId - Mem0 memory id
+ * @returns Memory plus its owning `userId`, or `null` when it does not exist
+ *
+ */
+export async function getUserMemory(memoryId: string) {
+    try {
+        const record = await getMem0Client().get(memoryId);
+        return { ...mapMemory(record), userId: record.userId ?? null };
+    } catch (error) {
+        if (error instanceof MemoryNotFoundError) {
+            return null;
+        }
+        throw error;
+    }
+}
 
 /**
  * Updates the text of an existing memory by id.

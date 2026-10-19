@@ -13,6 +13,7 @@ import { NotFoundError } from "../types/app-error.js";
 import {
     gatherSourceContext,
     generateArtifactContent,
+    resolveReadySourceIds,
 } from "./artifact-generation.service.js";
 import { getWorkspaceByIdForUser } from "./workspace.service.js";
 import type { CreateArtifactInput } from "../validators/artifact.validator.js";
@@ -82,10 +83,8 @@ export async function createArtifactForWorkspace(
 ) {
     await getWorkspaceByIdForUser(workspaceId, userId);
 
-    const context = await gatherSourceContext(
-        workspaceId,
-        input.sourceIds,
-    );
+    // Validate without loading source content; the worker gathers the text.
+    const sourceIds = await resolveReadySourceIds(workspaceId, input.sourceIds);
 
     const artifact = await createArtifactRecord({
         workspaceId,
@@ -102,7 +101,7 @@ export async function createArtifactForWorkspace(
                     REPORT: "AI Report",
                 }[input.type]
             } · ${new Date().toLocaleDateString()}`,
-        sourceIds: context.sourceIds,
+        sourceIds,
         status: "PENDING",
     });
 

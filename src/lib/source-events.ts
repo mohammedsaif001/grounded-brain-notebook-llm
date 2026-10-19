@@ -22,3 +22,35 @@ export async function enqueueSourceProcessing(input: {
         data: input,
     });
 }
+
+/**
+ * Signals that a source was deleted so any in-flight processing run is cancelled
+ * before it can write vectors for a source that no longer exists.
+ *
+ * @param input - Deleted source and its workspace id
+ * @returns Resolves when the event is accepted by Inngest
+ *
+ */
+export async function emitSourceDeleted(input: {
+    sourceId: string;
+    workspaceId: string;
+}) {
+    await inngest.send({
+        name: "source/deleted",
+        data: input,
+    });
+}
+
+/**
+ * Signals that a workspace was deleted so in-flight source and artifact runs are cancelled.
+ *
+ * @param input - Deleted workspace id
+ * @returns Resolves when the event is accepted by Inngest
+ *
+ */
+export async function emitWorkspaceDeleted(input: { workspaceId: string }) {
+    await inngest.send({
+        name: "workspace/deleted",
+        data: input,
+    });
+}

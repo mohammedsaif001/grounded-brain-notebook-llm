@@ -14,41 +14,59 @@ const DEFAULT_CHUNK_OVERLAP = 100;
 /**
  * Separators tried in order, from "most natural" to "most aggressive".
  *
- * The splitter walks this list and uses the first separator that actually
- * breaks the text into multiple parts. If none work, it falls back to raw
- * character slicing (the empty string `""` case in `splitText`).
+ * The splitter splits on the first separator present in the text, then recursively
+ * re-splits any piece that is still too large using the next separators in the list.
+ * The empty string `""` means "split into individual characters" (last resort).
  */
 const SEPARATORS = ["\n\n", "\n", ". ", " ", ""];
 
 /**
- * Combines small text splits into larger chunks without exceeding `chunkSize`.
+ * Combines small text splits into chunks of at most `chunkSize`, with overlap.
  *
  * Think of this as packing sentences/paragraphs into boxes: keep adding splits
- * until the next one would overflow the box, then seal the box and start a new one.
+ * until the next one would overflow the box, then seal the box. The next box starts
+ * with the tail of the previous one (up to `chunkOverlap` characters) so context
+ * isn't lost at the boundary.
  *
- * @param splits - Pieces produced by splitting on one separator (e.g. paragraphs)
+ * @param splits - Pieces produced by splitting on one separator, each <= `chunkSize`
  * @param separator - The separator to re-join with (e.g. `"\n\n"`)
  * @param chunkSize - Maximum characters allowed in one merged chunk
+ * @param chunkOverlap - Max characters carried over from the previous chunk
  * @returns An array of merged chunk strings
  *
  */
-function mergeSplits(splits: string[], separator: string, chunkSize: number) {
+function mergeSplits(
+    splits: string[],
+    separator: string,
+    chunkSize: number,
+    chunkOverlap: number,
+) {
     const docs: string[] = [];
+    const sepLen = separator.length;
     let current: string[] = [];
+    // Length of `current.join(separator)`.
     let total = 0;
 
     for (const split of splits) {
         const len = split.length;
-        const sepLen = current.length > 0 ? separator.length : 0;
 
-        if (total + len + sepLen > chunkSize && current.length > 0) {
+        if (current.length > 0 && total + sepLen + len > chunkSize) {
             docs.push(current.join(separator));
-            total = 0;
-            current = [];
+
+            // Drop pieces from the front until what's left fits within the overlap
+            // budget and leaves room for the incoming split.
+            while (
+                current.length > 0 &&
+                (total > chunkOverlap ||
+                    (total > 0 && total + sepLen + len > chunkSize))
+            ) {
+                total -= current[0].length + (current.length > 1 ? sepLen : 0);
+                current.shift();
+            }
         }
 
         current.push(split);
-        total += len + sepLen;
+        total += len + (current.length > 1 ? sepLen : 0);
     }
 
     if (current.length > 0) {
@@ -62,42 +80,65 @@ function mergeSplits(splits: string[], separator: string, chunkSize: number) {
  * Splits raw text into chunk strings using a recursive separator strategy.
  *
  * **How it works (step by step):**
- * 1. Try splitting on double newlines (`\n\n`) → keeps paragraphs together when possible
- * 2. If that fails, try single newlines (`\n`) → keeps lines together
- * 3. Then sentence boundaries (`. `)
- * 4. Then word boundaries (` `)
- * 5. Last resort: slice by character count with overlap
+ * 1. Split on the coarsest separator present (paragraphs `\n\n` first)
+ * 2. Pieces that fit are packed together by {@link mergeSplits}
+ * 3. Pieces that are still too large are recursively split with the finer
+ *    separators (lines → sentences → words → characters)
  *
- * The first separator that produces usable chunks wins; later separators are skipped.
+ * Every chunk is therefore guaranteed to be at most `chunkSize` characters, while
+ * keeping the most natural boundaries possible.
  *
  * @param text - Full text to split
- * @param chunkSize - Target max characters per chunk
- * @param chunkOverlap - Characters repeated between adjacent chunks (character fallback only)
- * @returns Array of non-empty chunk strings (no `index` or `metadata` yet)
+ * @param chunkSize - Max characters per chunk
+ * @param chunkOverlap - Characters carried over between adjacent chunks
+ * @param separators - Remaining separators to try (finest last)
+ * @returns Array of chunk strings (may include whitespace-only entries; caller filters)
  *
  */
-function splitText(text: string, chunkSize: number, chunkOverlap: number) {
-    const chunks: string[] = [];
-
-    for (const separator of SEPARATORS) {
-        if (separator) {
-            const splits = text.split(separator).filter(Boolean);
-            if (splits.length === 1) {
-                continue;
-            }
-            chunks.push(...mergeSplits(splits, separator, chunkSize));
-        } else {
-            for (let i = 0; i < text.length; i += chunkSize - chunkOverlap) {
-                chunks.push(text.slice(i, i + chunkSize));
-            }
-        }
-
-        if (chunks.length > 0) {
+function splitText(
+    text: string,
+    chunkSize: number,
+    chunkOverlap: number,
+    separators: string[] = SEPARATORS,
+): string[] {
+    let separatorIndex = separators.length - 1;
+    for (let i = 0; i < separators.length; i += 1) {
+        if (separators[i] === "" || text.includes(separators[i])) {
+            separatorIndex = i;
             break;
         }
     }
 
-    return chunks.filter((chunk) => chunk.trim().length > 0);
+    const separator = separators[separatorIndex];
+    const finerSeparators = separators.slice(separatorIndex + 1);
+    const splits = separator ? text.split(separator) : Array.from(text);
+
+    const chunks: string[] = [];
+    let pending: string[] = [];
+
+    for (const split of splits) {
+        if (!split) {
+            continue;
+        }
+
+        if (split.length <= chunkSize) {
+            pending.push(split);
+            continue;
+        }
+
+        if (pending.length > 0) {
+            chunks.push(...mergeSplits(pending, separator, chunkSize, chunkOverlap));
+            pending = [];
+        }
+
+        chunks.push(...splitText(split, chunkSize, chunkOverlap, finerSeparators));
+    }
+
+    if (pending.length > 0) {
+        chunks.push(...mergeSplits(pending, separator, chunkSize, chunkOverlap));
+    }
+
+    return chunks;
 }
 
 /**
@@ -122,7 +163,9 @@ export function chunkText(
 ): TextChunk[] {
     const chunkSize = options.chunkSize ?? DEFAULT_CHUNK_SIZE;
     const chunkOverlap = options.chunkOverlap ?? DEFAULT_CHUNK_OVERLAP;
-    const parts = splitText(text.trim(), chunkSize, chunkOverlap);
+    const parts = splitText(text.trim(), chunkSize, chunkOverlap)
+        .map((part) => part.trim())
+        .filter(Boolean);
 
     return parts.map((content, index) => ({
         index,

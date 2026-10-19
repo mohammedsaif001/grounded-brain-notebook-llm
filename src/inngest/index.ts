@@ -1,5 +1,5 @@
-import { findChunksBySourceId } from "../repositories/source-chunk.repository.js";
 import { findSourceById } from "../repositories/source.repository.js";
+import { findChunksBySourceId } from "../repositories/source-chunk.repository.js";
 import { processArtifactById } from "../services/artifact.service.js";
 import { summarizeConversationById } from "../services/conversation-memory.service.js";
 import { chunkSourceContent, embedAndIndexSource, extractSourceContent, markSourceFailed, markSourceProcessing } from "../services/source-processing.service.js";
@@ -10,6 +10,19 @@ export const processSource = inngest.createFunction(
         id: "process-source",
         retries: 3,
         triggers: [{ event: "source/created" }],
+        // One run per source at a time: a reprocess request queues behind the active run
+        // instead of racing it and leaving orphaned vectors behind.
+        concurrency: { key: "event.data.sourceId", limit: 1 },
+        cancelOn: [
+            {
+                event: "source/deleted",
+                if: "async.data.sourceId == event.data.sourceId",
+            },
+            {
+                event: "workspace/deleted",
+                if: "async.data.workspaceId == event.data.workspaceId",
+            },
+        ],
     },
     async ({ event, step }) => {
         const { sourceId } = event.data;
@@ -17,19 +30,19 @@ export const processSource = inngest.createFunction(
         await step.run("mark-processing", () => markSourceProcessing(sourceId));
 
         try {
-            const extracted = await step.run("extract-content", () =>
-                extractSourceContent(sourceId),
-            );
-
-            await step.run("chunk-content", () =>
-                chunkSourceContent(
+            // Extract + chunk run in one step so the full document text and PDF pages
+            // never pass through Inngest step state (which is size-limited).
+            const { chunkCount } = await step.run("extract-and-chunk", async () => {
+                const extracted = await extractSourceContent(sourceId);
+                const chunks = await chunkSourceContent(
                     sourceId,
                     extracted.text,
                     extracted.pages,
-                ),
-            );
+                );
+                return { chunkCount: chunks.length };
+            });
 
-            const result = await step.run("embed-and-index", async () => {
+            await step.run("embed-and-index", async () => {
                 const source = await findSourceById(sourceId);
                 if (!source) {
                     throw new Error("Source not found");
@@ -37,11 +50,9 @@ export const processSource = inngest.createFunction(
 
                 const chunks = await findChunksBySourceId(sourceId);
                 await embedAndIndexSource(source, chunks);
-
-                return { chunkCount: chunks.length };
             });
 
-            return { sourceId, status: "READY", ...result };
+            return { sourceId, status: "READY", chunkCount };
         } catch (error) {
             await step.run("mark-failed", async () => {
                 const source = await findSourceById(sourceId);
@@ -59,6 +70,12 @@ export const generateArtifact = inngest.createFunction(
         id: "generate-artifact",
         retries: 2,
         triggers: [{ event: "artifact/generate" }],
+        cancelOn: [
+            {
+                event: "workspace/deleted",
+                if: "async.data.workspaceId == event.data.workspaceId",
+            },
+        ],
     },
     async ({ event, step }) => {
         const { artifactId } = event.data;
@@ -74,6 +91,8 @@ export const summarizeConversation = inngest.createFunction(
         id: "summarize-conversation",
         retries: 2,
         triggers: [{ event: "conversation/summarize" }],
+        // Summaries are incremental, so two runs for the same conversation must not overlap.
+        concurrency: { key: "event.data.conversationId", limit: 1 },
     },
     async ({ event, step }) => {
         const { conversationId, userId } = event.data;
@@ -86,5 +105,4 @@ export const summarizeConversation = inngest.createFunction(
     },
 );
 
-
-export const functions = [processSource];
+export const functions = [processSource, generateArtifact, summarizeConversation];

@@ -19,6 +19,23 @@ export type SourceRecord = Prisma.SourceGetPayload<{
     select: typeof sourceSelect;
 }>;
 
+/** Same as {@link sourceSelect} minus `content`, which can be megabytes per source. */
+export const sourceSummarySelect = {
+    id: true,
+    workspaceId: true,
+    type: true,
+    title: true,
+    url: true,
+    status: true,
+    metadata: true,
+    createdAt: true,
+    updatedAt: true,
+} as const;
+
+export type SourceSummaryRecord = Prisma.SourceGetPayload<{
+    select: typeof sourceSummarySelect;
+}>;
+
 export type CreateSourceData = {
     workspaceId: string;
     type: SourceRecord["type"];
@@ -29,7 +46,7 @@ export type CreateSourceData = {
     metadata?: Prisma.InputJsonValue;
 };
 
-export function findSourcesByWorkspaceId(workspaceId: string, filters: ListSourcesQuery = {}) {
+function buildSourcesWhere(workspaceId: string, filters: ListSourcesQuery) {
     const where: Prisma.SourceWhereInput = {
         workspaceId,
     }
@@ -59,8 +76,25 @@ export function findSourcesByWorkspaceId(workspaceId: string, filters: ListSourc
         ]
     }
 
+    return where;
+}
+
+/** Lists sources without their `content`; use for listings and status checks. */
+export function findSourcesByWorkspaceId(workspaceId: string, filters: ListSourcesQuery = {}) {
     return prisma.source.findMany({
-        where,
+        where: buildSourcesWhere(workspaceId, filters),
+        select: sourceSummarySelect,
+        orderBy: { createdAt: "desc" },
+    })
+}
+
+/** Lists sources including full `content`; only for callers that need the text. */
+export function findSourcesWithContentByWorkspaceId(
+    workspaceId: string,
+    filters: ListSourcesQuery = {},
+) {
+    return prisma.source.findMany({
+        where: buildSourcesWhere(workspaceId, filters),
         select: sourceSelect,
         orderBy: { createdAt: "desc" },
     })
