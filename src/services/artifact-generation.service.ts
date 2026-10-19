@@ -1,11 +1,11 @@
 import { generateText, Output } from "ai";
-import { openai } from "../lib/openai.js";
+import { openai } from "../config/openai.js";
 import { z } from "zod";
 import {
     ARTIFACT_CONDENSE_SEGMENT_CHARS,
     ARTIFACT_MAX_CONTEXT_CHARS,
     CHAT_MODEL,
-} from "../lib/ai-config.js";
+} from "../config/ai.config.js";
 import { SourceRepository } from "../repositories/source.repository.js";
 import type { ArtifactRecord } from "../repositories/artifact.repository.js";
 import { APIError } from "../utils/api-error.js";

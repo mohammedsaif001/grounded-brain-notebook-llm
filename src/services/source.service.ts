@@ -1,9 +1,9 @@
 import type { Prisma } from "../generated/prisma/client.js";
 import { EventPublisher } from "../inngest/events.js";
-import { CloudinaryClient } from "../lib/cloudinary.js";
-import { FirecrawlClient } from "../lib/firecrawl.js";
-import { PdfExtractor } from "../lib/pdf.js";
-import { YoutubeClient } from "../lib/youtube.js";
+import { CloudinaryStorage } from "../lib/sources/cloudinary.js";
+import { FirecrawlClient } from "../lib/sources/firecrawl.js";
+import { PdfExtractor } from "../lib/sources/pdf.js";
+import { YoutubeClient } from "../lib/sources/youtube.js";
 import {
     SourceRepository,
     type CreateSourceData,
@@ -84,7 +84,7 @@ export class SourceService {
     ) {
         await WorkspaceService.getForUser(workspaceId, userId);
 
-        const upload = await CloudinaryClient.uploadPdf(file.buffer, file.originalname);
+        const upload = await CloudinaryStorage.uploadPdf(file.buffer, file.originalname);
 
         let content: string | null = null;
         let pageCount: number | undefined;

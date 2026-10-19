@@ -3,8 +3,9 @@
  */
 
 import { generateText } from "ai";
-import { CHAT_MODEL, RAG_MIN_SCORE, RAG_TOP_K } from "../lib/ai-config.js";
-import { EmbeddingClient, openai } from "../lib/openai.js";
+import { CHAT_MODEL, RAG_MIN_SCORE, RAG_TOP_K } from "../config/ai.config.js";
+import { openai } from "../config/openai.js";
+import { EmbeddingClient } from "../lib/rag/embeddings.js";
 import { VectorRepository } from "../repositories/vector.repository.js";
 import type { ConversationTurn, RetrievedChunk } from "../types/rag.types.js";
 

@@ -1,6 +1,6 @@
 import { generateText } from "ai";
-import { CHAT_MODEL } from "../lib/ai-config.js";
-import { openai } from "../lib/openai.js";
+import { CHAT_MODEL } from "../config/ai.config.js";
+import { openai } from "../config/openai.js";
 import { ConversationRepository } from "../repositories/conversation.repository.js";
 import { MessageRepository } from "../repositories/message.repository.js";
 import { MemoryService } from "./memory.service.js";

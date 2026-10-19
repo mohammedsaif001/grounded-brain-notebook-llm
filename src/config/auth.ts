@@ -4,14 +4,14 @@
  * Handles Google OAuth and session persistence via Prisma/PostgreSQL.
  * The client authenticates against routes mounted from this `auth` instance.
  *
- * Required env vars: `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
- * Optional: `BETTER_AUTH_URL`, `CLIENT_URL`
+ * Required env vars: `BETTER_AUTH_SECRET`
+ * Optional: `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` (Google login), `BETTER_AUTH_URL`, `CLIENT_URL`
  */
 
 
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
-import { env, isProduction } from "../config/env.js";
+import { env, isProduction } from "./env.js";
 import prisma from "./db.js";
 
 /**

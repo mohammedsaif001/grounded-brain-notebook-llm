@@ -6,7 +6,7 @@
  */
 
 import { MemoryClient } from "mem0ai";
-import { env } from "../config/env.js";
+import { env } from "./env.js";
 import { APIError } from "../utils/api-error.js";
 
 export class Mem0Client {

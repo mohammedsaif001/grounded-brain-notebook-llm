@@ -1,5 +1,5 @@
 import type { PineconeRecord } from "@pinecone-database/pinecone";
-import { PineconeClient, type VectorMetadata } from "../lib/pinecone.js";
+import { PineconeClient, type VectorMetadata } from "../config/pinecone.js";
 
 /** Pinecone upsert batch size. */
 const UPSERT_BATCH_SIZE = 100;

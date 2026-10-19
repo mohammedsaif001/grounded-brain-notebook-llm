@@ -5,10 +5,10 @@ import { errorHandler, notFoundHandler } from './middleware/error-handler.middle
 import { APIResponse } from './utils/api-response.js';
 import { registerRoutes } from './routes/index.js';
 import { toNodeHandler } from "better-auth/node";
-import { auth } from "./lib/auth.js";
+import { auth } from "./config/auth.js";
 import { requireAuth } from './middleware/require-auth-middleware.js';
 import { serve } from "inngest/express";
-import { inngest } from './inngest/client.js';
+import { inngest } from './config/inngest.js';
 import { functions } from "./inngest/index.js";
 
 const app = express();

@@ -1,10 +1,9 @@
 /**
- * Cloudinary client for PDF file storage.
+ * PDF file storage on Cloudinary.
  */
 
-import { v2 as cloudinary } from "cloudinary";
-import { env } from "../config/env.js";
-import { APIError } from "../utils/api-error.js";
+import { cloudinary, cloudinaryConfig } from "../../config/cloudinary.js";
+import { APIError } from "../../utils/api-error.js";
 
 /** Normalized result returned after a successful Cloudinary upload. */
 export type CloudinaryUploadResult = {
@@ -23,7 +22,7 @@ type CloudinaryUploadResponse = {
     error?: { message: string };
 };
 
-export class CloudinaryClient {
+export class CloudinaryStorage {
     /**
      * Builds a signed download URL for a private asset.
      *
@@ -33,20 +32,9 @@ export class CloudinaryClient {
         publicId: string,
         resourceType: "raw" | "image" = "raw",
     ) {
-        if (
-            !env.CLOUDINARY_CLOUD_NAME ||
-            !env.CLOUDINARY_API_KEY ||
-            !env.CLOUDINARY_API_SECRET
-        ) {
+        if (!cloudinaryConfig.canSign) {
             return null;
         }
-
-        cloudinary.config({
-            cloud_name: env.CLOUDINARY_CLOUD_NAME,
-            api_key: env.CLOUDINARY_API_KEY,
-            api_secret: env.CLOUDINARY_API_SECRET,
-            secure: true,
-        });
 
         return cloudinary.url(publicId, {
             resource_type: resourceType,
@@ -68,8 +56,7 @@ export class CloudinaryClient {
         buffer: Buffer,
         filename: string,
     ): Promise<CloudinaryUploadResult> {
-        const cloudName = env.CLOUDINARY_CLOUD_NAME;
-        const uploadPreset = env.CLOUDINARY_UPLOAD_PRESET;
+        const { cloudName, uploadPreset } = cloudinaryConfig;
 
         if (!cloudName || !uploadPreset) {
             throw APIError.ServiceUnavailable("Cloudinary is not configured on the server");

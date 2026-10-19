@@ -4,7 +4,7 @@
  * Use this type when typing Express request handlers that access `req.session`.
  */
 
-import type { auth } from "../lib/auth.js";
+import type { auth } from "../config/auth.js";
 
 /**
  * Authenticated session shape including `user` and `session` metadata.

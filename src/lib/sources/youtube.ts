@@ -3,7 +3,7 @@
  */
 
 import { YoutubeTranscript } from "youtube-transcript";
-import { APIError } from "../utils/api-error.js";
+import { APIError } from "../../utils/api-error.js";
 
 export class YoutubeClient {
     /**

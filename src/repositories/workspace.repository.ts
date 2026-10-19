@@ -1,4 +1,4 @@
-import prisma from "../lib/db.js";
+import prisma from "../config/db.js";
 import type {
     CreateWorkspaceInput,
     UpdateWorkspaceInput,

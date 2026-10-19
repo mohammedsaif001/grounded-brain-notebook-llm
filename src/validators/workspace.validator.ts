@@ -1,5 +1,5 @@
 import {z} from "zod";
-import { CHAT_MODELS } from "../lib/ai-config.js";
+import { CHAT_MODELS } from "../config/ai.config.js";
 
 export const createWorkspaceSchema = z.object({
     title: z.string().trim().min(1, "Title is required").max(120),

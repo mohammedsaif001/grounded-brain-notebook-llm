@@ -6,7 +6,7 @@
  */
 
 import { extractText, getDocumentProxy } from "unpdf";
-import { CloudinaryClient } from "./cloudinary.js";
+import { CloudinaryStorage } from "./cloudinary.js";
 
 /** Result of extracting text from a PDF document. */
 export type PdfExtractResult = {
@@ -84,7 +84,7 @@ export class PdfExtractor {
                 throw error;
             }
 
-            const signedUrl = CloudinaryClient.getSignedDownloadUrl(
+            const signedUrl = CloudinaryStorage.getSignedDownloadUrl(
                 input.publicId,
                 input.resourceType ?? "raw",
             );

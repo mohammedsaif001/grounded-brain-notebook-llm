@@ -32,10 +32,10 @@ import {
     CONVERSATION_SUMMARY_INTERVAL,
     QUERY_REWRITE_WINDOW,
     RECENT_MESSAGE_WINDOW,
-} from "../lib/ai-config.js";
-import { ChatPrompt } from "../lib/chat-prompt.js";
-import { openai } from "../lib/openai.js";
-import { TavilyClient, type TavilySearchResult } from "../lib/tavily.js";
+} from "../config/ai.config.js";
+import { ChatPrompt } from "../lib/rag/chat-prompt.js";
+import { openai } from "../config/openai.js";
+import { TavilyClient, type TavilySearchResult } from "../lib/sources/tavily.js";
 import { ConversationRepository } from "../repositories/conversation.repository.js";
 import { MessageRepository } from "../repositories/message.repository.js";
 import { APIError } from "../utils/api-error.js";

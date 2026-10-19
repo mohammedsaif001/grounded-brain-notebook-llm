@@ -1,6 +1,6 @@
 import { MemoryNotFoundError } from "mem0ai";
-import { Mem0Client } from "../lib/mem0.js";
-import { MEMORY_SEARCH_MIN_SCORE, MEMORY_SEARCH_TOP_K } from "../lib/ai-config.js";
+import { Mem0Client } from "../config/mem0.js";
+import { MEMORY_SEARCH_MIN_SCORE, MEMORY_SEARCH_TOP_K } from "../config/ai.config.js";
 
 /** Message shape accepted by Mem0 for inferred memory extraction. */
 export type MemoryMessage = {

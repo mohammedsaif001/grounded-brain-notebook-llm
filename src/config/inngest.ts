@@ -1,5 +1,5 @@
 import { Inngest } from "inngest";
-import { env, inngestDevMode } from "../config/env.js";
+import { env, inngestDevMode } from "./env.js";
 
 export const inngest = new Inngest({
     id: "grounded-brain-notebook-llm",

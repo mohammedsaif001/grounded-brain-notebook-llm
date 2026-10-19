@@ -3,8 +3,8 @@
  */
 
 import { tavily } from "@tavily/core";
-import { env } from "../config/env.js";
-import { APIError } from "../utils/api-error.js";
+import { env } from "../../config/env.js";
+import { APIError } from "../../utils/api-error.js";
 
 export type TavilySearchResult = {
     title: string;

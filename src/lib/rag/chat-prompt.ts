@@ -4,7 +4,7 @@
  * Pure helpers with no I/O; retrieval itself lives in `RetrievalService`.
  */
 
-import type { RetrievedChunk } from "../types/rag.types.js";
+import type { RetrievedChunk } from "../../types/rag.types.js";
 
 /**
  * Neutralizes text that could close or spoof the XML-style delimiters used in prompts.

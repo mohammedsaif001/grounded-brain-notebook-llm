@@ -1,7 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { fromNodeHeaders } from "better-auth/node";
-import { auth } from "../lib/auth.js";
-import type { Session } from "../lib/session.js";
+import { auth } from "../config/auth.js";
+import type { Session } from "../types/session.types.js";
 import { APIError } from "../utils/api-error.js";
 
 declare module "express-serve-static-core" {

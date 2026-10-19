@@ -9,8 +9,8 @@
  */
 
 import { Pinecone, type Index } from "@pinecone-database/pinecone";
-import { env } from "../config/env.js";
-import { EMBEDDING_DIMENSIONS } from "./ai-config.js";
+import { env } from "./env.js";
+import { EMBEDDING_DIMENSIONS } from "./ai.config.js";
 
 /** Metadata stored on each Pinecone vector for RAG retrieval and citations. */
 export type VectorMetadata = {

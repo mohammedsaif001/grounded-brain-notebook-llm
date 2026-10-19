@@ -1,7 +1,7 @@
 import { ArtifactService } from "../services/artifact.service.js";
 import { ConversationMemoryService } from "../services/conversation-memory.service.js";
 import { SourceProcessingService } from "../services/source-processing.service.js";
-import { inngest } from "./client.js";
+import { inngest } from "../config/inngest.js";
 
 export const processSource = inngest.createFunction(
     {

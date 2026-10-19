@@ -15,10 +15,10 @@
 
 import type { PineconeRecord } from "@pinecone-database/pinecone";
 import type { Prisma } from "../generated/prisma/client.js";
-import { TextChunker } from "../lib/chunking.js";
-import { EmbeddingClient } from "../lib/openai.js";
-import { PdfExtractor } from "../lib/pdf.js";
-import type { VectorMetadata } from "../lib/pinecone.js";
+import { TextChunker } from "../lib/rag/chunking.js";
+import { EmbeddingClient } from "../lib/rag/embeddings.js";
+import { PdfExtractor } from "../lib/sources/pdf.js";
+import type { VectorMetadata } from "../config/pinecone.js";
 import {
     SourceChunkRepository,
     type SourceChunkRecord,

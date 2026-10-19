@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CHAT_MODELS } from "../lib/ai-config.js";
+import { CHAT_MODELS } from "../config/ai.config.js";
 import { workspaceIdParamSchema } from "./workspace.validator.js";
 
 export const conversationIdParamSchema = workspaceIdParamSchema.extend({

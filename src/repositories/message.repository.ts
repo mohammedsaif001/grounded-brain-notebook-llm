@@ -1,5 +1,5 @@
 import type { Prisma } from "../generated/prisma/client.js";
-import prisma from "../lib/db.js";
+import prisma from "../config/db.js";
 
 export const messageSelect = {
     id: true,

@@ -5,8 +5,8 @@
  * payload shape is defined in one place.
  */
 
-import { CONVERSATION_SUMMARY_INTERVAL } from "../lib/ai-config.js";
-import { inngest } from "./client.js";
+import { CONVERSATION_SUMMARY_INTERVAL } from "../config/ai.config.js";
+import { inngest } from "../config/inngest.js";
 
 export class EventPublisher {
     /** Queues the extract → chunk → embed → index pipeline for a source. */
