@@ -1,0 +1,17 @@
+// A chat thread in a workspace, with its rolling summary.
+model Conversation {
+  id                  String    @id @default(cuid())
+  workspaceId         String
+  title               String?
+  summary             String?
+  summaryMessageCount Int       @default(0)
+  summarizedAt        DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  workspace           Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  messages            Message[]
+
+  @@index([workspaceId])
+  @@index([workspaceId, updatedAt])
+  @@map("conversation")
+}

@@ -1,0 +1,19 @@
+// One chat turn; assistant messages carry the citations they used.
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  role           MessageRole
+  content        String
+  citations      Json?
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([conversationId, createdAt])
+  @@map("message")
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+}

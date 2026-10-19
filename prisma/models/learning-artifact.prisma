@@ -1,0 +1,35 @@
+// AI-generated study material (summary, quiz, flashcards, mind map, ...).
+model LearningArtifact {
+  id          String         @id @default(cuid())
+  workspaceId String
+  type        ArtifactType
+  title       String
+  content     Json?
+  sourceIds   String[]
+  status      ArtifactStatus @default(PENDING)
+  metadata    Json?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([workspaceId, type])
+  @@index([workspaceId, status])
+  @@map("learning_artifact")
+}
+
+enum ArtifactType {
+  SUMMARY
+  TAKEAWAYS
+  FLASHCARDS
+  QUIZ
+  MINDMAP
+  REPORT
+}
+
+enum ArtifactStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
