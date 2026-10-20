@@ -473,7 +473,7 @@
                 "{{workspaceId}}"
               ]
             },
-            "description": ""
+            "description": "Returns one workspace owned by the signed-in user. Another user's workspace returns 404."
           }
         },
         {
@@ -562,7 +562,7 @@
                 "workspaces"
               ]
             },
-            "description": ""
+            "description": "`title` is trimmed, so whitespace-only fails validation. Expect 400 `VALIDATION_ERROR` with `details.title`."
           }
         },
         {
@@ -606,7 +606,7 @@
                 "{{workspaceId}}"
               ]
             },
-            "description": ""
+            "description": "PATCH needs at least one field. Expect 400 `VALIDATION_ERROR` (\"At least one field is required\")."
           }
         },
         {
@@ -645,7 +645,7 @@
                 "workspaces"
               ]
             },
-            "description": ""
+            "description": "Invalid JSON is rejected by the body parser. Expect 400 `BAD_REQUEST` (\"Request body is not valid JSON\")."
           }
         },
         {
@@ -676,7 +676,7 @@
                 "does-not-exist"
               ]
             },
-            "description": ""
+            "description": "Unknown ids (and other users' workspaces) return 404 `NOT_FOUND`."
           }
         }
       ]
@@ -775,7 +775,7 @@
                 "sources"
               ]
             },
-            "description": ""
+            "description": "Same as TEXT with `type: \"MARKDOWN\"`. Saved as `sourceId2`. Returns 201 with status `PENDING`; a background job indexes it."
           }
         },
         {
@@ -1126,7 +1126,7 @@
                 }
               ]
             },
-            "description": ""
+            "description": "`type` must be one of `PDF`, `WEBSITE`, `YOUTUBE`, `TEXT`, `MARKDOWN`. Expect 400 `VALIDATION_ERROR`."
           }
         },
         {
@@ -1159,7 +1159,7 @@
                 "does-not-exist"
               ]
             },
-            "description": ""
+            "description": "Unknown source ids in this workspace return 404 `NOT_FOUND`."
           }
         }
       ]
@@ -1409,7 +1409,7 @@
                 "youtube"
               ]
             },
-            "description": ""
+            "description": "Only `watch?v=`, `youtu.be/`, `embed/` and `shorts/` URLs are accepted. Expect 400 `BAD_REQUEST` (\"Enter a valid YouTube URL\")."
           }
         }
       ]
@@ -1600,7 +1600,7 @@
                 "chat"
               ]
             },
-            "description": ""
+            "description": "`messages` needs at least one entry. Expect 400 `VALIDATION_ERROR`."
           }
         },
         {
@@ -1646,7 +1646,7 @@
                 "chat"
               ]
             },
-            "description": ""
+            "description": "A `conversationId` that doesn't exist in this workspace returns 404 `NOT_FOUND` (as JSON, before any streaming starts)."
           }
         }
       ]
@@ -1683,7 +1683,7 @@
                 "conversations"
               ]
             },
-            "description": ""
+            "description": "Conversations in the workspace, most recently active first. `summary` is filled in by a background job once a conversation has 8+ messages."
           }
         },
         {
@@ -1798,7 +1798,7 @@
                 "{{conversationId2}}"
               ]
             },
-            "description": ""
+            "description": "Deletes the conversation and its messages. Returns 204."
           }
         },
         {
@@ -1832,7 +1832,7 @@
                 "messages"
               ]
             },
-            "description": ""
+            "description": "Unknown conversation ids return 404 `NOT_FOUND`."
           }
         }
       ]
@@ -1913,7 +1913,7 @@
                 "memory"
               ]
             },
-            "description": ""
+            "description": "Up to 100 memories for the user: `source: \"manual\"` (created via the API) or `\"learned\"` (extracted from chats in the background). Returns `[]` when Mem0 isn't configured."
           }
         },
         {
@@ -1961,7 +1961,7 @@
                 "{{memoryId}}"
               ]
             },
-            "description": ""
+            "description": "Replaces the memory's text (1–2000 chars). Another user's memory returns 404. Needs `MEM0_API_KEY`."
           }
         },
         {
@@ -2004,7 +2004,7 @@
                 "memory"
               ]
             },
-            "description": ""
+            "description": "`memory` must be 1–2000 characters. Expect 400 `VALIDATION_ERROR`."
           }
         },
         {
@@ -2100,7 +2100,7 @@
                 "artifacts"
               ]
             },
-            "description": ""
+            "description": "Queues a markdown summary of all READY sources. Returns 201 with status `PENDING`. `content` when READY: `{ markdown }`."
           }
         },
         {
@@ -2145,7 +2145,7 @@
                 "artifacts"
               ]
             },
-            "description": ""
+            "description": "Queues key takeaways. `content` when READY: `{ items: string[] }` (3–20)."
           }
         },
         {
@@ -2190,7 +2190,7 @@
                 "artifacts"
               ]
             },
-            "description": ""
+            "description": "Queues flashcards. `content` when READY: `{ cards: [{ front, back }] }` (3–30)."
           }
         },
         {
@@ -2235,7 +2235,7 @@
                 "artifacts"
               ]
             },
-            "description": ""
+            "description": "Queues a mind map. `content` when READY: `{ nodes: [{ id, label }], edges: [{ id, source, target }] }`; edges always reference existing nodes."
           }
         },
         {
@@ -2280,7 +2280,7 @@
                 "artifacts"
               ]
             },
-            "description": ""
+            "description": "Queues a long-form report. `content` when READY: `{ markdown, sections: [{ title, content }] }`."
           }
         },
         {
@@ -2325,7 +2325,7 @@
                 "artifacts"
               ]
             },
-            "description": ""
+            "description": "Optional `title` (≤120) and `sourceIds` limit generation to those READY sources. Saved as `artifactId`. `content` when READY: `{ questions: [{ question, options, correctIndex, explanation }] }` with a 0-based `correctIndex`."
           }
         },
         {
@@ -2401,7 +2401,7 @@
                 "{{artifactId}}"
               ]
             },
-            "description": ""
+            "description": "Returns the artifact. Status `PENDING` → `PROCESSING` → `READY` (with `content`) or `FAILED` (with `metadata.processingError`)."
           }
         },
         {
@@ -2432,7 +2432,7 @@
                 "artifacts"
               ]
             },
-            "description": ""
+            "description": "All artifacts in the workspace, newest first."
           }
         },
         {
@@ -2477,7 +2477,7 @@
                 "artifacts"
               ]
             },
-            "description": ""
+            "description": "`type` must be `SUMMARY`, `TAKEAWAYS`, `FLASHCARDS`, `QUIZ`, `MINDMAP` or `REPORT`. Expect 400 `VALIDATION_ERROR`."
           }
         },
         {
@@ -2510,7 +2510,7 @@
                 "does-not-exist"
               ]
             },
-            "description": ""
+            "description": "Unknown artifact ids return 404 `NOT_FOUND`."
           }
         }
       ]
@@ -2570,7 +2570,7 @@
                 "email"
               ]
             },
-            "description": ""
+            "description": "Creates a second user (`emailB`). The session cookie switches to user B for the next requests."
           }
         },
         {
@@ -2600,7 +2600,7 @@
                 "{{workspaceId}}"
               ]
             },
-            "description": ""
+            "description": "User B must not see user A's workspace. Other users' resources return 404, not 403, so ids can't be probed."
           }
         },
         {
@@ -2632,7 +2632,7 @@
                 "{{sourceId}}"
               ]
             },
-            "description": ""
+            "description": "User B must not read user A's sources."
           }
         },
         {
@@ -2677,7 +2677,7 @@
                 "chat"
               ]
             },
-            "description": ""
+            "description": "User B must not chat with user A's workspace."
           }
         },
         {
@@ -2756,7 +2756,7 @@
                 "email"
               ]
             },
-            "description": ""
+            "description": "Switches the session cookie back to user A for the cleanup folder."
           }
         }
       ]
@@ -2794,7 +2794,7 @@
                 "{{artifactId}}"
               ]
             },
-            "description": ""
+            "description": "Deletes the artifact. Returns 204."
           }
         },
         {
@@ -2828,7 +2828,7 @@
                 "{{memoryId}}"
               ]
             },
-            "description": ""
+            "description": "Deletes the memory created earlier. Returns 204. Needs `MEM0_API_KEY`."
           }
         },
         {
@@ -2860,7 +2860,7 @@
                 "{{conversationId}}"
               ]
             },
-            "description": ""
+            "description": "Deletes the conversation and its messages. Returns 204."
           }
         },
         {
@@ -2968,7 +2968,7 @@
                 "{{workspaceId}}"
               ]
             },
-            "description": ""
+            "description": "Deletes the workspace and, by cascade, its sources, chunks, conversations, messages and artifacts. Also cancels running background jobs and deletes its Pinecone vectors. Returns 204."
           }
         },
         {
@@ -2998,7 +2998,7 @@
                 "{{workspaceId}}"
               ]
             },
-            "description": ""
+            "description": "After deletion the workspace returns 404."
           }
         },
         {
@@ -3042,7 +3042,7 @@
                 "sign-out"
               ]
             },
-            "description": ""
+            "description": "Ends the Better Auth session and clears the cookie."
           }
         },
         {
@@ -3071,7 +3071,7 @@
                 "me"
               ]
             },
-            "description": ""
+            "description": "Without a session, `/api/me` returns 401 `UNAUTHORIZED`."
           }
         }
       ]
@@ -3107,7 +3107,7 @@
                 "workspaces"
               ]
             },
-            "description": ""
+            "description": "Protected route without a session: 401 `UNAUTHORIZED`."
           }
         },
         {
@@ -3139,7 +3139,7 @@
                 "sources"
               ]
             },
-            "description": ""
+            "description": "Protected route without a session: 401 `UNAUTHORIZED`."
           }
         },
         {
@@ -3185,7 +3185,7 @@
                 "chat"
               ]
             },
-            "description": ""
+            "description": "Protected route without a session: 401 `UNAUTHORIZED`."
           }
         },
         {
@@ -3215,7 +3215,7 @@
                 "memory"
               ]
             },
-            "description": ""
+            "description": "Protected route without a session: 401 `UNAUTHORIZED`."
           }
         },
         {
@@ -3261,7 +3261,7 @@
                 "artifacts"
               ]
             },
-            "description": ""
+            "description": "Protected route without a session: 401 `UNAUTHORIZED`."
           }
         }
       ]
