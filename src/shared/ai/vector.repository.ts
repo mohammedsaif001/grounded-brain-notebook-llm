@@ -1,8 +1,24 @@
-import type { PineconeRecord } from "@pinecone-database/pinecone";
+import { Errors, type PineconeRecord } from "@pinecone-database/pinecone";
 import { PineconeClient, type VectorMetadata } from "../../config/pinecone.js";
 
 /** Pinecone upsert batch size. */
 const UPSERT_BATCH_SIZE = 100;
+
+/**
+ * Runs a delete, treating "namespace not found" as success.
+ *
+ * A workspace's namespace only exists after its first upsert, and Pinecone answers deletes
+ * against a missing namespace with 404. There is nothing to delete in that case.
+ */
+async function ignoreMissingNamespace(remove: () => Promise<void>) {
+    try {
+        await remove();
+    } catch (error) {
+        if (!(error instanceof Errors.PineconeNotFoundError)) {
+            throw error;
+        }
+    }
+}
 
 /**
  * Data access for source chunk vectors (Pinecone).
@@ -38,14 +54,16 @@ export class VectorRepository {
     /** Deletes every vector belonging to one source. */
     static async deleteBySourceId(workspaceId: string, sourceId: string) {
         const index = await PineconeClient.getIndex();
-        await index.namespace(workspaceId).deleteMany({
-            filter: { sourceId: { $eq: sourceId } },
-        });
+        await ignoreMissingNamespace(() =>
+            index.namespace(workspaceId).deleteMany({
+                filter: { sourceId: { $eq: sourceId } },
+            }),
+        );
     }
 
     /** Deletes a workspace's entire namespace. */
     static async deleteByWorkspaceId(workspaceId: string) {
         const index = await PineconeClient.getIndex();
-        await index.namespace(workspaceId).deleteAll();
+        await ignoreMissingNamespace(() => index.namespace(workspaceId).deleteAll());
     }
 }

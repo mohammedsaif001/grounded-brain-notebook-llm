@@ -75,33 +75,33 @@ export class SourceProcessingService {
     /**
      * Reads extractable text from a source.
      *
-     * 1. **Text already in DB** — `source.content` (TEXT, website scrape, YouTube transcript, etc.)
-     * 2. **PDF** — downloads from Cloudinary and runs PDF text extraction
+     * 1. **PDF** — downloads from Cloudinary and extracts per page, so chunks keep page
+     *    numbers for citations. The text saved at upload has no page boundaries, so it is
+     *    only used when the PDF has no `fileUrl`.
+     * 2. **Text already in DB** — `source.content` (TEXT, website scrape, YouTube transcript, etc.)
      *
-     * @throws If a PDF is missing `fileUrl` or the source has no content at all
+     * @throws If the source has no content at all
      */
     private static async extractText(source: SourceRecord) {
-        const text = source.content?.trim();
-        if (text) {
-            return { text, pageCount: undefined, pages: undefined };
-        }
+        const metadata = readMetadata(source.metadata);
 
-        if (source.type === "PDF") {
-            const metadata = readMetadata(source.metadata);
-            if (!metadata.fileUrl) {
-                throw new Error("PDF source is missing fileUrl metadata");
-            }
-
+        if (source.type === "PDF" && metadata.fileUrl) {
             const extracted = await PdfExtractor.fromCloudinary({
                 fileUrl: metadata.fileUrl,
                 publicId: metadata.publicId,
-                resourceType: metadata.resourceType ?? "image",
+                // Uploads go to Cloudinary's `raw/upload` endpoint.
+                resourceType: metadata.resourceType ?? "raw",
             });
             return {
                 text: extracted.text,
                 pageCount: extracted.pageCount,
                 pages: extracted.pages,
             };
+        }
+
+        const text = source.content?.trim();
+        if (text) {
+            return { text, pageCount: undefined, pages: undefined };
         }
 
         throw new Error(`Source ${source.id} has no extractable content`);

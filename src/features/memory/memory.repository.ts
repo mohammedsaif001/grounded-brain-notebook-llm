@@ -43,6 +43,33 @@ function toMemoryRecord(record: {
     };
 }
 
+type RawMemory = Parameters<typeof toMemoryRecord>[0];
+
+/**
+ * Extracts the first memory from a Mem0 write response.
+ *
+ * mem0ai's typings say `add`/`update` return `Memory[]`, but the platform API actually
+ * returns `{ results: [{ id, data: { memory } }] }` from `add` and a single memory object
+ * from `update`. All three shapes are accepted so an SDK fix doesn't break us either way.
+ */
+function firstMemory(response: unknown): RawMemory | null {
+    if (Array.isArray(response)) {
+        return (response[0] as RawMemory | undefined) ?? null;
+    }
+
+    if (!response || typeof response !== "object") {
+        return null;
+    }
+
+    const { results } = response as { results?: unknown };
+    if (Array.isArray(results)) {
+        const first = results[0] as (RawMemory & { data?: { memory?: string } }) | undefined;
+        return first ? { ...first, memory: first.memory ?? first.data?.memory } : null;
+    }
+
+    return "id" in response ? (response as RawMemory) : null;
+}
+
 /**
  * Data access for user memories (Mem0).
  *
@@ -108,12 +135,13 @@ export class MemoryRepository {
             metadata: input.metadata,
         });
 
-        const first = created[0];
+        const first = firstMemory(created);
         if (!first) {
             throw new Error("Mem0 did not return a created memory");
         }
 
-        return toMemoryRecord(first);
+        // The add response doesn't echo metadata; use what we sent so `source` is right.
+        return toMemoryRecord({ ...first, metadata: first.metadata ?? input.metadata ?? null });
     }
 
     /** Lets Mem0 infer and store memories from conversation turns. No-op when Mem0 is off. */
@@ -143,7 +171,7 @@ export class MemoryRepository {
             text: input.memory,
         });
 
-        const first = updated[0];
+        const first = firstMemory(updated);
         if (!first) {
             throw new Error("Mem0 did not return an updated memory");
         }

@@ -33,11 +33,13 @@ export class CloudinaryStorage {
             return null;
         }
 
-        return cloudinary.url(publicId, {
+        // An authenticated API download, not a signed delivery URL: accounts with PDF
+        // delivery restricted (Cloudinary's default on free plans) reject signed delivery
+        // URLs with 401, but the API download works regardless. `publicId` of a raw upload
+        // already includes the extension, so no format is passed.
+        return cloudinary.utils.private_download_url(publicId, "", {
             resource_type: resourceType,
             type: "upload",
-            sign_url: true,
-            secure: true,
         });
     }
 
