@@ -1,3 +1,8 @@
+/**
+ * Global error handling: converts any thrown value (validation, Prisma, multer, OpenAI,
+ * body-parser, unknown) into the standard error envelope, plus the 404 catch-all.
+ */
+
 import type { NextFunction, Request, Response } from "express";
 import { flattenError, ZodError } from "zod";
 import multer from "multer";
@@ -28,6 +33,9 @@ const DB_UNAVAILABLE_CODES = new Set([
  *
  * Most of these come from races, e.g. a row deleted by another request between the
  * ownership check and the write.
+ *
+ * @param error - Any thrown value
+ * @returns A client-safe {@link APIError}, or `null` when the error is not a recognised Prisma case
  */
 function fromPrismaError(error: unknown): APIError | null {
     if (error instanceof Prisma.PrismaClientInitializationError) {
@@ -58,6 +66,9 @@ function fromPrismaError(error: unknown): APIError | null {
  * Converts any thrown value into an {@link APIError}.
  *
  * Unknown errors are logged and reported as a generic 500 so internals never leak.
+ *
+ * @param error - Any thrown value
+ * @returns The API error to send to the client
  */
 function toAPIError(error: unknown): APIError {
     if (error instanceof APIError) {
@@ -107,6 +118,14 @@ function toAPIError(error: unknown): APIError {
     return APIError.Internal();
 }
 
+/**
+ * Express error-handling middleware; the last middleware registered in `app.ts`.
+ *
+ * @param error - Value thrown or passed to `next(err)`
+ * @param _req - Unused request
+ * @param res - Express response used to send the error envelope
+ * @param next - Delegates to Express when headers were already sent
+ */
 export function errorHandler(error: unknown, _req: Request, res: Response, next: NextFunction) {
     // A streaming response (e.g. chat) has already started; let Express close the connection.
     if (res.headersSent) {
@@ -125,7 +144,12 @@ export function errorHandler(error: unknown, _req: Request, res: Response, next:
     APIResponse.Error(res, apiError);
 }
 
-/** Catch-all for unmatched routes; register after all routes, before {@link errorHandler}. */
+/**
+ * Catch-all for unmatched routes; register after all routes, before {@link errorHandler}.
+ *
+ * @param req - Request that matched no route
+ * @throws {APIError} NotFound always
+ */
 export function notFoundHandler(req: Request) {
     throw APIError.NotFound(`Route ${req.method} ${req.path} not found`);
 }

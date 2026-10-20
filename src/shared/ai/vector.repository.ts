@@ -9,6 +9,8 @@ const UPSERT_BATCH_SIZE = 100;
  *
  * A workspace's namespace only exists after its first upsert, and Pinecone answers deletes
  * against a missing namespace with 404. There is nothing to delete in that case.
+ *
+ * @param remove - Callback performing the Pinecone delete
  */
 async function ignoreMissingNamespace(remove: () => Promise<void>) {
     try {
@@ -26,7 +28,12 @@ async function ignoreMissingNamespace(remove: () => Promise<void>) {
  * Each workspace is its own namespace, so queries never cross workspaces.
  */
 export class VectorRepository {
-    /** Upserts vectors into a workspace namespace in batches. */
+    /**
+     * Upserts vectors into a workspace namespace in batches.
+     *
+     * @param workspaceId - Namespace to write to
+     * @param records - Vectors with their {@link VectorMetadata}; an empty array is a no-op
+     */
     static async upsert(workspaceId: string, records: PineconeRecord<VectorMetadata>[]) {
         if (records.length === 0) {
             return;
@@ -39,7 +46,14 @@ export class VectorRepository {
         }
     }
 
-    /** Returns the `topK` most similar vectors (with metadata) in a workspace. */
+    /**
+     * Returns the `topK` most similar vectors (with metadata) in a workspace.
+     *
+     * @param workspaceId - Namespace to search
+     * @param vector - Query embedding
+     * @param topK - Maximum number of matches to return
+     * @returns Matches ordered by descending cosine similarity (empty if none)
+     */
     static async query(workspaceId: string, vector: number[], topK: number) {
         const index = await PineconeClient.getIndex();
         const result = await index.namespace(workspaceId).query({
@@ -51,7 +65,12 @@ export class VectorRepository {
         return result.matches ?? [];
     }
 
-    /** Deletes every vector belonging to one source. */
+    /**
+     * Deletes every vector belonging to one source.
+     *
+     * @param workspaceId - Namespace containing the vectors
+     * @param sourceId - Source whose chunk vectors should be removed
+     */
     static async deleteBySourceId(workspaceId: string, sourceId: string) {
         const index = await PineconeClient.getIndex();
         await ignoreMissingNamespace(() =>
@@ -61,7 +80,11 @@ export class VectorRepository {
         );
     }
 
-    /** Deletes a workspace's entire namespace. */
+    /**
+     * Deletes a workspace's entire namespace.
+     *
+     * @param workspaceId - Namespace (workspace) to wipe
+     */
     static async deleteByWorkspaceId(workspaceId: string) {
         const index = await PineconeClient.getIndex();
         await ignoreMissingNamespace(() => index.namespace(workspaceId).deleteAll());

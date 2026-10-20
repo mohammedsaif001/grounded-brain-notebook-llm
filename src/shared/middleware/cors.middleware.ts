@@ -1,3 +1,5 @@
+/** CORS policy for the web client. */
+
 import cors from "cors";
 import { env } from "../../config/env.js";
 

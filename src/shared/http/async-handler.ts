@@ -4,6 +4,7 @@
 
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 
+/** An Express handler that returns a promise. */
 type AsyncRequestHandler = (req: Request, res: Response, next: NextFunction) => Promise<void>;
 
 /**
@@ -14,8 +15,6 @@ type AsyncRequestHandler = (req: Request, res: Response, next: NextFunction) => 
  *
  * @param handler - Async route handler function
  * @returns Express-compatible `RequestHandler`
- *
- *
  */
 export function asyncHandler(handler: AsyncRequestHandler): RequestHandler {
     return (req, res, next) => {

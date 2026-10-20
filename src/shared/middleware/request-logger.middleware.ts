@@ -1,3 +1,5 @@
+/** Per-request structured logging with request ids. */
+
 import { randomUUID } from "node:crypto";
 import type { Request } from "express";
 import { pinoHttp } from "pino-http";

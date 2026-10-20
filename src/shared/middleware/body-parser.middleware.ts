@@ -1,3 +1,5 @@
+/** Body parsing middleware (JSON and URL-encoded). */
+
 import express from "express";
 
 /**

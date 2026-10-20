@@ -13,12 +13,27 @@ import type { Request } from "express";
 import { ipKeyGenerator, rateLimit } from "express-rate-limit";
 import { APIError } from "../http/api-error.js";
 
-/** Authenticated user id when `requireAuth` has run, otherwise the client IP. */
+/**
+ * Rate-limit key: the authenticated user id when `requireAuth` has run, otherwise the client IP.
+ *
+ * @param req - Incoming request
+ * @returns A `user:<id>` or `ip:<address>` key
+ */
 function userOrIpKey(req: Request) {
     const userId = (req.session as Request["session"] | undefined)?.user?.id;
     return userId ? `user:${userId}` : `ip:${ipKeyGenerator(req.ip ?? "")}`;
 }
 
+/**
+ * Builds a limiter that reports overages through the standard error envelope.
+ *
+ * @param options.windowMs - Length of the counting window in milliseconds
+ * @param options.limit - Max requests per key within the window
+ * @param options.message - Message returned in the 429 response
+ * @param options.perUser - Key by user id (falling back to IP) instead of IP only
+ * @param options.skip - Return `true` to exempt a request from limiting
+ * @returns Express rate-limit middleware
+ */
 function createRateLimiter(options: {
     windowMs: number;
     limit: number;

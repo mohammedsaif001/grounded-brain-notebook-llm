@@ -8,6 +8,5 @@ import type { auth } from "../../config/auth.js";
 
 /**
  * Authenticated session shape including `user` and `session` metadata.
- *
  */
 export type Session = typeof auth.$Infer.Session;

@@ -1,3 +1,8 @@
+/**
+ * Inngest background functions: source processing, artifact generation and conversation
+ * summaries. Served to Inngest by `app.ts` at `/api/inngest`.
+ */
+
 import { z } from "zod";
 import { propagateAttributes } from "@langfuse/tracing";
 import { inngest } from "../config/inngest.js";
@@ -7,13 +12,21 @@ import { SourceProcessingService } from "../features/source/source-processing.se
 
 // Event payloads are untyped at the Inngest boundary; validate them before use so a
 // malformed event fails loudly instead of passing `undefined` ids downstream.
+/** Payload of `source/created`. */
 const sourceEventSchema = z.object({ sourceId: z.string().min(1), workspaceId: z.string().min(1) });
+/** Payload of `artifact/generate`. */
 const artifactEventSchema = z.object({ artifactId: z.string().min(1) });
+/** Payload of `conversation/summarize`. */
 const conversationEventSchema = z.object({
     conversationId: z.string().min(1),
     userId: z.string().min(1),
 });
 
+/**
+ * Runs the source pipeline as separate retryable steps: mark processing → extract and
+ * chunk → embed and index. Marks the source FAILED if any step exhausts its retries.
+ * Runs one at a time per source and is cancelled if the source or workspace is deleted.
+ */
 const processSource = inngest.createFunction(
     {
         id: "process-source",
@@ -57,6 +70,7 @@ const processSource = inngest.createFunction(
     },
 );
 
+/** Generates one learning artifact with the LLM. Cancelled if its workspace is deleted. */
 const generateArtifact = inngest.createFunction(
     {
         id: "generate-artifact",
@@ -82,6 +96,7 @@ const generateArtifact = inngest.createFunction(
     },
 );
 
+/** Updates a conversation's rolling summary. Serialised per conversation. */
 const summarizeConversation = inngest.createFunction(
     {
         id: "summarize-conversation",
@@ -104,4 +119,5 @@ const summarizeConversation = inngest.createFunction(
     },
 );
 
+/** All functions registered with the Inngest `serve` handler. */
 export const functions = [processSource, generateArtifact, summarizeConversation];
