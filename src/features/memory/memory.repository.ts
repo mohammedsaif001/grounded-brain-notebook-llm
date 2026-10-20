@@ -1,4 +1,4 @@
-import { MemoryNotFoundError } from "mem0ai";
+import { MemoryNotFoundError, ValidationError } from "mem0ai";
 import { Mem0Client } from "../../config/mem0.js";
 import { MEMORY_SEARCH_MIN_SCORE, MEMORY_SEARCH_TOP_K } from "../../config/ai.config.js";
 
@@ -98,7 +98,9 @@ export class MemoryRepository {
             const record = await Mem0Client.get().get(memoryId);
             return { ...toMemoryRecord(record), userId: record.userId ?? null };
         } catch (error) {
-            if (error instanceof MemoryNotFoundError) {
+            // Mem0 rejects ids that aren't UUIDs with a ValidationError; such an id can't
+            // match any memory, so it's "not found" too rather than a server error.
+            if (error instanceof MemoryNotFoundError || error instanceof ValidationError) {
                 return null;
             }
             throw error;
