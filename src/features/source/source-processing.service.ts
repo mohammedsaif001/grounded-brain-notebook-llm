@@ -135,8 +135,8 @@ export class SourceProcessingService {
         await SourceChunkRepository.deleteAllBySourceId(sourceId);
 
         const chunks = extracted.pages?.length
-            ? TextChunker.chunkPages(extracted.pages)
-            : TextChunker.chunkText(extracted.text);
+            ? await TextChunker.chunkPages(extracted.pages)
+            : await TextChunker.chunkText(extracted.text);
 
         if (chunks.length === 0) {
             throw new Error("No chunks were generated from source content");
@@ -147,7 +147,7 @@ export class SourceProcessingService {
                 sourceId,
                 index: chunk.index,
                 content: chunk.content,
-                tokenCount: Math.ceil(chunk.content.length / 4),
+                tokenCount: chunk.tokenCount,
                 metadata: chunk.metadata as Prisma.InputJsonValue | undefined,
             })),
         );

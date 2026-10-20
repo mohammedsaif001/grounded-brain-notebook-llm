@@ -6,6 +6,7 @@
  * carry active content, since uploaded files are later served back to users from Cloudinary.
  */
 
+import sanitize from "sanitize-filename";
 import { getDocumentProxy } from "unpdf";
 import { APIError } from "../../../shared/http/api-error.js";
 
@@ -85,16 +86,20 @@ export class PdfValidator {
 
     /**
      * Makes a client-supplied filename safe to store and display: strips any path,
-     * control characters, and unusual symbols, caps the length, and keeps a `.pdf` suffix.
+     * illegal/control characters and OS-reserved names, caps the length, and keeps a
+     * `.pdf` suffix.
      */
     static sanitizeFilename(originalName: string) {
         const baseName = originalName.split(/[\\/]/).pop() ?? "";
-        const stem = baseName
-            .replace(/\.pdf$/i, "")
-            .normalize("NFKC")
-            // eslint-disable-next-line no-control-regex -- stripping control characters is the point
-            .replace(/[\u0000-\u001f\u007f]/g, "")
-            .replace(/[^\p{L}\p{N} ._()-]/gu, "_")
+        const stem = sanitize(
+            baseName
+                .replace(/\.pdf$/i, "")
+                .normalize("NFKC")
+                .trim(),
+            {
+                replacement: "_",
+            },
+        )
             .replace(/\s+/g, " ")
             .trim()
             .slice(0, 100);
