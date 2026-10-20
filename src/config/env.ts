@@ -80,6 +80,12 @@ const envSchema = z
         LANGFUSE_SECRET_KEY: optionalString,
         // EU cloud by default; US is https://us.cloud.langfuse.com, or your self-hosted URL.
         LANGFUSE_BASE_URL: optional(z.url()),
+
+        // Log shipping to Axiom; enabled by AXIOM_TOKEN, otherwise logs only go to stdout.
+        AXIOM_TOKEN: optionalString,
+        AXIOM_DATASET: optionalString,
+        // Regional ingest domain without scheme, e.g. eu-central-1.aws.edge.axiom.co. Blank = US.
+        AXIOM_EDGE: optionalString,
     })
     .superRefine((value, ctx) => {
         /**
@@ -108,6 +114,15 @@ const envSchema = z
             "signed Cloudinary downloads",
         );
         requireTogether(["LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"], "Langfuse tracing");
+
+        // AXIOM_TOKEN switches log shipping on; the dataset may be preset without a token.
+        if (value.AXIOM_TOKEN && !value.AXIOM_DATASET) {
+            ctx.addIssue({
+                code: "custom",
+                path: ["AXIOM_DATASET"],
+                message: "Required when AXIOM_TOKEN is set (Axiom log shipping)",
+            });
+        }
 
         const inngestDev = value.INNGEST_DEV === "1" || value.INNGEST_DEV === "true";
 

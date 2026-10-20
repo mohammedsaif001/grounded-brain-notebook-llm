@@ -100,7 +100,7 @@ flowchart LR
 | **YouTube**              | [youtube-transcript](https://www.npmjs.com/package/youtube-transcript)                                             | Video transcripts                                                           |
 | **File uploads**         | [multer](https://github.com/expressjs/multer), sanitize-filename                                                   | Multipart PDF uploads with limits                                           |
 | **Rate limiting**        | [express-rate-limit](https://express-rate-limit.mintlify.app/), [p-queue](https://github.com/sindresorhus/p-queue) | Inbound limits per IP/user; outbound OpenAI throttling                      |
-| **Logging**              | [pino](https://getpino.io/), pino-http, pino-pretty                                                                | Structured JSON logs with request ids                                       |
+| **Logging**              | [pino](https://getpino.io/), pino-http, pino-pretty; optional [Axiom](https://axiom.co/)                           | Structured JSON logs with request ids; stored and searchable in Axiom       |
 | **LLM observability**    | [Langfuse](https://langfuse.com/) + OpenTelemetry                                                                  | Traces of every prompt, response, token count and latency                   |
 | **Linting**              | [ESLint 10](https://eslint.org/) + typescript-eslint (type-aware)                                                  | Static analysis                                                             |
 | **Formatting**           | [Prettier](https://prettier.io/)                                                                                   | Consistent code style                                                       |
@@ -132,6 +132,7 @@ flowchart LR
     Q --> OAI["OpenAI"]
     S --> EXT["Tavily · Firecrawl · YouTube"]
     S -.-> LF["Langfuse"]
+    MW -. logs .-> AX["Axiom"]
 ```
 
 <details>
@@ -171,6 +172,7 @@ Icon diagrams (Eraser) are in [docs/diagrams](docs/diagrams/README.md).
 | [Tavily](https://tavily.com/)                  | optional                                    | Web search in chat                                 |
 | [Mem0](https://app.mem0.ai/)                   | optional                                    | Memories                                           |
 | [Langfuse](https://langfuse.com/)              | optional                                    | LLM tracing                                        |
+| [Axiom](https://axiom.co/)                     | optional                                    | Stored, searchable logs                            |
 | Google OAuth client                            | optional locally / yes in production        | Google sign-in                                     |
 
 Optional integrations degrade gracefully: their endpoints return `503` and everything else works.

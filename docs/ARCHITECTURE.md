@@ -98,6 +98,7 @@ flowchart LR
         FC["Firecrawl<br/>website scraping"]
         YT["YouTube<br/>transcripts"]
         LF["Langfuse<br/>LLM tracing"]
+        AX["Axiom<br/>log storage (optional)"]
     end
 
     Client -- "HTTPS + session cookie" --> MW
@@ -113,6 +114,7 @@ flowchart LR
     Svc --> FC
     Svc --> YT
     Svc -. OpenTelemetry spans .-> LF
+    MW -. pino log lines .-> AX
 ```
 
 <details>
@@ -204,6 +206,7 @@ flowchart LR
 | -------------------------------- | ---------------- | ------------------------------------------------------------------------------------- |
 | **pino** + **pino-http**         | Fast JSON logger | One structured log line per request with a request id; JSON in production             |
 | **pino-pretty** (dev only)       | Log formatter    | Readable, coloured logs in development                                                |
+| **Axiom** (`@axiomhq/pino`)      | Log storage      | Optional: ships every log line to Axiom so logs are stored and searchable in a web UI |
 | **Langfuse** + **OpenTelemetry** | LLM tracing      | See every prompt, response, token count and latency, grouped by user and conversation |
 
 ### Code quality and tooling
@@ -932,6 +935,13 @@ instance. Behind a proxy, set `TRUST_PROXY_HOPS` so the real client IP is used.
 - **Request ids:** each response has an `X-Request-Id` header. A caller-supplied `X-Request-Id`
   (letters, digits, `_`, `-`, ≤ 64 chars) is reused, so ids can follow a request across services.
 - **`req.log`** is a request-scoped child logger.
+- **Where logs go:** pino writes to stdout only, so locally they appear in the `[api]` lines of
+  the `npm run dev` terminal, and in production your host captures them (Render/Railway logs tab,
+  `docker logs`, CloudWatch, ...). Nothing is written to disk.
+- **Axiom (optional):** set `AXIOM_TOKEN` (plus `AXIOM_DATASET`, and `AXIOM_EDGE` for the region)
+  and every log line is also shipped to [Axiom](https://axiom.co) through the `@axiomhq/pino`
+  transport, alongside the console output. Search there by `req.id` (the `X-Request-Id`),
+  `userId`, `level` or `msg`. The free plan keeps logs for 30 days.
 - **Langfuse** for LLM calls (see [§10](#telemetry-langfuse)); **Inngest dashboard** for jobs;
   **Prisma Studio** (`npm run db:studio`) for data.
 
@@ -943,32 +953,35 @@ All environment variables are validated at boot by [`src/config/env.ts`](../src/
 the server exits with a readable list of problems if anything is wrong. Nothing else reads
 `process.env`. Blank values (`FOO=`) count as unset. Copy [`.env.example`](../.env.example) to `.env`.
 
-| Variable                                             | Required | Default                       | Purpose                                                                |
-| ---------------------------------------------------- | -------- | ----------------------------- | ---------------------------------------------------------------------- |
-| `NODE_ENV`                                           |          | `development`                 | `development` / `test` / `production`                                  |
-| `PORT`                                               |          | `8080`                        | HTTP port                                                              |
-| `CLIENT_URL`                                         |          | `http://localhost:3000`       | Web client origin (CORS, trusted origin)                               |
-| `TRUST_PROXY_HOPS`                                   |          | `0`                           | Reverse proxies in front of the app                                    |
-| `LOG_LEVEL`                                          |          | `debug` / `info`              | pino level                                                             |
-| `DATABASE_URL`                                       | **yes**  |                               | Postgres connection string                                             |
-| `BETTER_AUTH_SECRET`                                 | **yes**  |                               | Signs sessions; long random string                                     |
-| `BETTER_AUTH_URL`                                    |          | `CLIENT_URL`                  | Public base URL of the auth routes                                     |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`          | pair     |                               | Google login                                                           |
-| `OPENAI_API_KEY`                                     | **yes**  |                               | OpenAI                                                                 |
-| `OPENAI_MAX_CONCURRENCY`                             |          | `4`                           | Outbound queue concurrency                                             |
-| `OPENAI_REQUESTS_PER_MINUTE`                         |          | `300`                         | Outbound queue rate                                                    |
-| `OPENAI_MAX_QUEUE`                                   |          | `100`                         | Waiting calls before 429                                               |
-| `PINECONE_API_KEY`                                   | **yes**  |                               | Pinecone                                                               |
-| `PINECONE_INDEX`                                     |          | `grounded-brain-notebook-llm` | Index name (auto-created: 1536 dims, cosine, AWS us-east-1 serverless) |
-| `INNGEST_DEV`                                        |          |                               | `1` to use the local dev server                                        |
-| `INNGEST_EVENT_KEY` / `INNGEST_SIGNING_KEY`          | **prod** |                               | Inngest Cloud                                                          |
-| `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_UPLOAD_PRESET` | pair     |                               | PDF uploads (unsigned preset)                                          |
-| `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET`       | pair     |                               | Signed downloads of private PDFs                                       |
-| `FIRECRAWL_API_KEY`                                  |          |                               | Website imports                                                        |
-| `TAVILY_API_KEY`                                     |          |                               | Web search                                                             |
-| `MEM0_API_KEY`                                       |          |                               | Memories                                                               |
-| `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY`        | pair     |                               | LLM tracing                                                            |
-| `LANGFUSE_BASE_URL`                                  |          | EU cloud                      | Langfuse region or self-hosted URL                                     |
+| Variable                                             | Required   | Default                       | Purpose                                                                |
+| ---------------------------------------------------- | ---------- | ----------------------------- | ---------------------------------------------------------------------- |
+| `NODE_ENV`                                           |            | `development`                 | `development` / `test` / `production`                                  |
+| `PORT`                                               |            | `8080`                        | HTTP port                                                              |
+| `CLIENT_URL`                                         |            | `http://localhost:3000`       | Web client origin (CORS, trusted origin)                               |
+| `TRUST_PROXY_HOPS`                                   |            | `0`                           | Reverse proxies in front of the app                                    |
+| `LOG_LEVEL`                                          |            | `debug` / `info`              | pino level                                                             |
+| `DATABASE_URL`                                       | **yes**    |                               | Postgres connection string                                             |
+| `BETTER_AUTH_SECRET`                                 | **yes**    |                               | Signs sessions; long random string                                     |
+| `BETTER_AUTH_URL`                                    |            | `CLIENT_URL`                  | Public base URL of the auth routes                                     |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`          | pair       |                               | Google login                                                           |
+| `OPENAI_API_KEY`                                     | **yes**    |                               | OpenAI                                                                 |
+| `OPENAI_MAX_CONCURRENCY`                             |            | `4`                           | Outbound queue concurrency                                             |
+| `OPENAI_REQUESTS_PER_MINUTE`                         |            | `300`                         | Outbound queue rate                                                    |
+| `OPENAI_MAX_QUEUE`                                   |            | `100`                         | Waiting calls before 429                                               |
+| `PINECONE_API_KEY`                                   | **yes**    |                               | Pinecone                                                               |
+| `PINECONE_INDEX`                                     |            | `grounded-brain-notebook-llm` | Index name (auto-created: 1536 dims, cosine, AWS us-east-1 serverless) |
+| `INNGEST_DEV`                                        |            |                               | `1` to use the local dev server                                        |
+| `INNGEST_EVENT_KEY` / `INNGEST_SIGNING_KEY`          | **prod**   |                               | Inngest Cloud                                                          |
+| `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_UPLOAD_PRESET` | pair       |                               | PDF uploads (unsigned preset)                                          |
+| `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET`       | pair       |                               | Signed downloads of private PDFs                                       |
+| `FIRECRAWL_API_KEY`                                  |            |                               | Website imports                                                        |
+| `TAVILY_API_KEY`                                     |            |                               | Web search                                                             |
+| `MEM0_API_KEY`                                       |            |                               | Memories                                                               |
+| `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY`        | pair       |                               | LLM tracing                                                            |
+| `LANGFUSE_BASE_URL`                                  |            | EU cloud                      | Langfuse region or self-hosted URL                                     |
+| `AXIOM_TOKEN`                                        |            |                               | Ship logs to Axiom (ingest token); off when unset                      |
+| `AXIOM_DATASET`                                      | with token |                               | Axiom dataset name                                                     |
+| `AXIOM_EDGE`                                         |            | US                            | Regional ingest domain, e.g. `us-east-1.aws.edge.axiom.co`             |
 
 "pair" means both must be set or neither. Optional integrations degrade gracefully: their
 endpoints return **503** and the rest of the app keeps working.
@@ -1040,7 +1053,7 @@ npm start                  # node dist/server.js
 - [ ] Health checks: liveness `GET /health`, readiness `GET /health/ready`.
 - [ ] The process handles `SIGTERM`: stops accepting connections and flushes traces.
 - [ ] Tune `OPENAI_*` limits to your OpenAI tier.
-- [ ] Optional: Langfuse keys for tracing; Cloudinary, Firecrawl, Tavily, Mem0 keys for those features.
+- [ ] Optional: Langfuse keys for tracing; Axiom keys for stored, searchable logs; Cloudinary, Firecrawl, Tavily, Mem0 keys for those features.
 - [ ] **Running more than one instance:** inbound rate-limit counters are per instance, and so
       is the OpenAI queue. Use a shared store (for example `rate-limit-redis`) if limits must be global.
 

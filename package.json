@@ -80,6 +80,7 @@
   "homepage": "https://github.com/mohammedsaif001/grounded-brain-notebook-llm#readme",
   "dependencies": {
     "@ai-sdk/openai": "^4.0.96",
+    "@axiomhq/pino": "^2.0.0",
     "@langchain/core": "^1.2.18",
     "@langchain/textsplitters": "^1.0.2",
     "@langfuse/otel": "^6.0.1",

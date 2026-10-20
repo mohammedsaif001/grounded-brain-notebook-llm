@@ -42,6 +42,7 @@ AI and external [color: orange] {
   Firecrawl [icon: globe, label: "Firecrawl (website → markdown)"]
   YouTube [icon: youtube, label: "YouTube transcripts"]
   Langfuse [icon: activity, label: "Langfuse (LLM tracing)"]
+  Axiom [icon: file-text, label: "Axiom (log storage, optional)"]
 }
 
 // ----- Connections -----
@@ -68,3 +69,4 @@ process-source > Services
 generate-artifact > Services
 summarize-conversation > Services
 Services --> Langfuse: OpenTelemetry spans
+Middleware --> Axiom: pino log lines
