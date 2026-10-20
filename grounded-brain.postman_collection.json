@@ -1,9 +1,34 @@
 {
   "info": {
-    "name": "Grounded Brain Notebook LLM",
-    "description": "Import this collection. Variables are on the collection (Variables tab). Postman keeps cookies automatically, so sign in with Chapter 04 first. IDs are saved into variables by the test scripts of the create requests.",
+    "name": "Grounded Brain API",
+    "description": "\nBackend API for **Grounded Brain**, a NotebookLM-style app. Users create **workspaces**, add **sources** (text, markdown, PDF, website, YouTube, web results), **chat** with them using RAG with citations, generate **learning artifacts** (summary, takeaways, flashcards, quiz, mind map, report), and keep long-term **memories**.\n\n## How to use this collection\n\n1. Start everything locally: `npm run dev` (Postgres, API on :8080, Inngest dev server, Prisma Studio).\n2. **Run the whole collection** (Runner → Run). The folders go in order and build on each other: sign up → workspace → sources → chat → memory → artifacts → isolation checks → cleanup.\n3. Or send requests one by one. IDs are saved into collection variables as you go.\n\n\"Wait until READY\" requests poll in the **Collection Runner** only. When you send them by hand, re-send until the status is `READY`. Background jobs need the Inngest dev server, which `npm run dev` starts.\n\n## Auth\n\nCookie sessions via Better Auth. **Sign up** or **Sign in** sets the session cookie, and Postman sends it on every later request automatically. A collection-level script adds the `Origin` header that Better Auth requires.\n\nEach run signs up a fresh user (`user-<timestamp>@test.local`), so the collection can be re-run without conflicts.\n\n## Responses\n\nEvery JSON response uses one envelope:\n\n```json\n{ \"success\": true, \"data\": { ... }, \"message\": \"optional\" }\n{ \"success\": false, \"error\": { \"code\": \"NOT_FOUND\", \"message\": \"Workspace not found\", \"details\": {} } }\n```\n\n- Deletes return **204** with no body. Async work (reprocess) returns **202**.\n- Error codes: `BAD_REQUEST`, `VALIDATION_ERROR` (with field `details`), `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `PAYLOAD_TOO_LARGE`, `TOO_MANY_REQUESTS`, `INTERNAL_SERVER_ERROR`, `SERVICE_UNAVAILABLE`.\n- **503** means an optional integration (Cloudinary, Firecrawl, Mem0, Tavily) is not configured on the server.\n- **Exception:** `POST /chat` streams an AI SDK UI message stream (server-sent events), not JSON.\n- Every response has an `X-Request-Id` header. Send your own to correlate with server logs.\n\n## Rate limits\n\n300 requests / 15 min per IP on `/api`; 20 / min per user for chat and artifact creation; 30 / 10 min per user for uploads, imports and reprocessing. Over the limit → **429** `TOO_MANY_REQUESTS`.\n\n## Variables\n\n| Variable | Meaning |\n|---|---|\n| `baseUrl` | API base URL (default `http://localhost:8080`) |\n| `origin` | Must match the server's `CLIENT_URL` (default `http://localhost:3000`) |\n| `emailA` / `emailB` / `password` | Test users (emails are generated per run) |\n| `workspaceId`, `sourceId`, `sourceId2`, `conversationId`, `memoryId`, `artifactId` | Saved automatically by the requests that create them |\n",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Better Auth rejects cross-site POSTs without a trusted Origin.",
+          "pm.request.headers.upsert({ key: \"Origin\", value: pm.collectionVariables.get(\"origin\") });"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Every JSON response (except Better Auth's own routes) uses the { success, data | error } envelope.",
+          "const isJson = (pm.response.headers.get(\"Content-Type\") || \"\").includes(\"application/json\");",
+          "if (isJson && !pm.request.url.getPath().startsWith(\"/api/auth\")) {",
+          "    pm.test(\"response uses the API envelope\", () => pm.expect(pm.response.json()).to.have.property(\"success\"));",
+          "}"
+        ]
+      }
+    }
+  ],
   "variable": [
     {
       "key": "baseUrl",
@@ -15,11 +40,11 @@
     },
     {
       "key": "emailA",
-      "value": "a@test.local"
+      "value": ""
     },
     {
       "key": "emailB",
-      "value": "b@test.local"
+      "value": ""
     },
     {
       "key": "password",
@@ -38,7 +63,15 @@
       "value": ""
     },
     {
+      "key": "pdfSourceId",
+      "value": ""
+    },
+    {
       "key": "conversationId",
+      "value": ""
+    },
+    {
+      "key": "conversationId2",
       "value": ""
     },
     {
@@ -50,29 +83,89 @@
       "value": ""
     },
     {
-      "key": "emptyWorkspaceId",
-      "value": ""
+      "key": "pollCount",
+      "value": "0"
     }
   ],
   "item": [
     {
-      "name": "Chapter 04 — Authentication",
-      "description": "Dev-only email/password login so you can test without the client or Google.\nRun in order: sign up -> sign in -> get-session -> /api/me.\nAuth requests send an Origin header (better-auth checks it against trustedOrigins).",
+      "name": "00 · Health",
+      "description": "Unauthenticated liveness check.",
       "item": [
         {
-          "name": "1. Sign up user A",
+          "name": "Health check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"ok\", () => pm.expect(pm.response.json().data.status).to.eql(\"ok\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Returns `{ status: \"ok\" }`. No auth. Not request-logged."
+          }
+        }
+      ]
+    },
+    {
+      "name": "01 · Auth",
+      "description": "Better Auth email/password (enabled outside production). Google OAuth is also available when configured, via the browser flow at `/api/auth/sign-in/social`.",
+      "item": [
+        {
+          "name": "Sign up",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"emailA\", \"user-\" + Date.now() + \"@test.local\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "Origin",
-                "value": "{{origin}}"
-              },
               {
                 "key": "Content-Type",
                 "value": "application/json"
               }
             ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Test User\",\n  \"email\": \"{{emailA}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
             "url": {
               "raw": "{{baseUrl}}/api/auth/sign-up/email",
               "host": [
@@ -85,43 +178,39 @@
                 "email"
               ]
             },
-            "description": "Creates the user and sets the session cookie. Run once.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Test User A\",\n  \"email\": \"{{emailA}}\",\n  \"password\": \"{{password}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
+            "description": "Creates user A and starts a session (sets the cookie). A fresh email is generated every run."
+          }
+        },
+        {
+          "name": "Sign in",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));"
                 ]
               }
             }
-          ]
-        },
-        {
-          "name": "2. Sign in user A",
+          ],
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "Origin",
-                "value": "{{origin}}"
-              },
               {
                 "key": "Content-Type",
                 "value": "application/json"
               }
             ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{emailA}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
             "url": {
               "raw": "{{baseUrl}}/api/auth/sign-in/email",
               "host": [
@@ -134,31 +223,22 @@
                 "email"
               ]
             },
-            "description": "Sets the better-auth.session_token cookie (kept automatically).",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"email\": \"{{emailA}}\",\n  \"password\": \"{{password}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
+            "description": "Signs in an existing user and sets the session cookie."
+          }
+        },
+        {
+          "name": "Get session",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));"
                 ]
               }
             }
-          ]
-        },
-        {
-          "name": "3. Get session",
+          ],
           "request": {
             "method": "GET",
             "header": [],
@@ -173,22 +253,23 @@
                 "get-session"
               ]
             },
-            "description": "Should return { session, user }."
-          },
+            "description": "Better Auth's session endpoint: returns `{ session, user }` (not the API envelope)."
+          }
+        },
+        {
+          "name": "Current user",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"is user A\", () => pm.expect(pm.response.json().data.email).to.eql(pm.collectionVariables.get(\"emailA\")));"
                 ]
               }
             }
-          ]
-        },
-        {
-          "name": "4. GET /api/me (temporary route from Step 4.7)",
+          ],
           "request": {
             "method": "GET",
             "header": [],
@@ -202,203 +283,29 @@
                 "me"
               ]
             },
-            "description": "Your user JSON. Needs requireAuth working."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "5. Sign out",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Origin",
-                "value": "{{origin}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/auth/sign-out",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "auth",
-                "sign-out"
-              ]
-            },
-            "description": "Clears the cookie.",
-            "body": {
-              "mode": "raw",
-              "raw": "{}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "6. /api/me after sign-out (expect 401)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/me",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "me"
-              ]
-            },
-            "description": "Proves requireAuth rejects anonymous requests. Sign in again afterwards."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 401\", function () { pm.response.to.have.status(401); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Extra: sign up user B",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Origin",
-                "value": "{{origin}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/auth/sign-up/email",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "auth",
-                "sign-up",
-                "email"
-              ]
-            },
-            "description": "Used for ownership tests (Ch 5+). This logs you in as B; sign in as A again to switch back.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Test User B\",\n  \"email\": \"{{emailB}}\",\n  \"password\": \"{{password}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Extra: sign in user B",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Origin",
-                "value": "{{origin}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/auth/sign-in/email",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "auth",
-                "sign-in",
-                "email"
-              ]
-            },
-            "description": "Switch to user B.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"email\": \"{{emailB}}\",\n  \"password\": \"{{password}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
-                ]
-              }
-            }
-          ]
+            "description": "The signed-in user. 401 without a session."
+          }
         }
       ]
     },
     {
-      "name": "Chapter 05 — Workspaces",
-      "description": "Signed in as user A first (Chapter 04 file).",
+      "name": "02 · Workspaces",
+      "description": "A workspace holds sources, conversations and artifacts. Every workspace route checks ownership and returns **404** for other users' workspaces.",
       "item": [
         {
           "name": "Create workspace",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"workspaceId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -407,6 +314,15 @@
                 "value": "application/json"
               }
             ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Biology notes\",\n  \"description\": \"Photosynthesis and respiration\",\n  \"icon\": \"🌱\",\n  \"defaultModel\": \"gpt-4o-mini\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
             "url": {
               "raw": "{{baseUrl}}/api/workspaces",
               "host": [
@@ -417,31 +333,23 @@
                 "workspaces"
               ]
             },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"title\": \"Operating Systems\",\n  \"icon\": \"📚\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 201\", function () { pm.response.to.have.status(201); });",
-                  "if (pm.response.code < 300) { pm.collectionVariables.set(\"workspaceId\", pm.response.json().id); }"
-                ]
-              }
-            }
-          ]
+            "description": "Body: `title` (required, ≤120), `description` (≤500), `icon` (≤8 chars, e.g. an emoji), `defaultModel` (`gpt-4o-mini` | `gpt-4o`)."
+          }
         },
         {
           "name": "List workspaces",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"is an array\", () => pm.expect(pm.response.json().data).to.be.an(\"array\"));"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [],
@@ -454,22 +362,23 @@
                 "api",
                 "workspaces"
               ]
-            }
-          },
+            },
+            "description": "The user's workspaces, most recently updated first."
+          }
+        },
+        {
+          "name": "Get workspace",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));"
                 ]
               }
             }
-          ]
-        },
-        {
-          "name": "Get workspace",
+          ],
           "request": {
             "method": "GET",
             "header": [],
@@ -483,22 +392,24 @@
                 "workspaces",
                 "{{workspaceId}}"
               ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
-                ]
-              }
-            }
-          ]
+            },
+            "description": ""
+          }
         },
         {
           "name": "Update workspace",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"title updated\", () => pm.expect(pm.response.json().data.title).to.eql(\"Biology notes (updated)\"));"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "PATCH",
             "header": [
@@ -507,6 +418,15 @@
                 "value": "application/json"
               }
             ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Biology notes (updated)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
             "url": {
               "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}",
               "host": [
@@ -518,73 +438,23 @@
                 "{{workspaceId}}"
               ]
             },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"defaultModel\": \"gpt-4o\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
+            "description": "Partial update; at least one field is required."
+          }
+        },
+        {
+          "name": "[400] Create with blank title",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"VALIDATION_ERROR\", () => pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_ERROR\"));"
                 ]
               }
             }
-          ]
-        },
-        {
-          "name": "Update with empty body (expect 400)",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 400\", function () { pm.response.to.have.status(400); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Create with blank title (expect 400)",
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -593,16 +463,6 @@
                 "value": "application/json"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces"
-              ]
-            },
             "body": {
               "mode": "raw",
               "raw": "{\n  \"title\": \"   \"\n}",
@@ -611,95 +471,7 @@
                   "language": "json"
                 }
               }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 400\", function () { pm.response.to.have.status(400); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Delete workspace (run last)",
-          "request": {
-            "method": "DELETE",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 204\", function () { pm.response.to.have.status(204); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Get deleted workspace (expect 404)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}"
-              ]
             },
-            "description": "Also run this as user B against user A's id: must be 404."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 404\", function () { pm.response.to.have.status(404); });"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "Chapter 06 — Sources: text & markdown",
-      "description": "Creates its own workspace first.",
-      "item": [
-        {
-          "name": "0. Create a workspace",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
             "url": {
               "raw": "{{baseUrl}}/api/workspaces",
               "host": [
@@ -710,31 +482,74 @@
                 "workspaces"
               ]
             },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"title\": \"Sources playground\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
+            "description": ""
+          }
+        },
+        {
+          "name": "[400] Update with empty body",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status is 201\", function () { pm.response.to.have.status(201); });",
-                  "if (pm.response.code < 300) { pm.collectionVariables.set(\"workspaceId\", pm.response.json().id); }"
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));"
                 ]
               }
             }
-          ]
-        },
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}"
+              ]
+            },
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 · Sources",
+      "description": "Sources are the material the workspace is grounded in. Creating one returns it as `PENDING` and queues a background job (Inngest) that extracts text, chunks it (~1000 chars, PDFs keep page numbers), embeds it and indexes it in Pinecone, then marks it `READY` (or `FAILED` with `metadata.processingError`).\n\nStatuses: `PENDING` → `PROCESSING` → `READY` | `FAILED`.",
+      "item": [
         {
           "name": "Create TEXT source",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"sourceId\", pm.response.json().data.id);",
+                  "pm.test(\"starts PENDING\", () => pm.expect(pm.response.json().data.status).to.eql(\"PENDING\"));"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -743,6 +558,15 @@
                 "value": "application/json"
               }
             ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"TEXT\",\n  \"title\": \"Photosynthesis\",\n  \"content\": \"Photosynthesis turns light into chemical energy in the chloroplasts. The light-dependent reactions in the thylakoid membranes produce ATP and NADPH. The Calvin cycle in the stroma uses them to fix carbon dioxide into glucose. Oxygen is released when water is split.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
             "url": {
               "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources",
               "host": [
@@ -755,31 +579,23 @@
                 "sources"
               ]
             },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"type\": \"TEXT\",\n  \"title\": \"Notes\",\n  \"content\": \"Processes and threads are the basic units of execution. A process has its own address space; threads inside a process share memory.\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 201\", function () { pm.response.to.have.status(201); });",
-                  "if (pm.response.code < 300) { pm.collectionVariables.set(\"sourceId\", pm.response.json().id); }"
-                ]
-              }
-            }
-          ]
+            "description": "Body: `type` (`TEXT` | `MARKDOWN`), `title` (≤200), `content`. Use the upload/import endpoints for other types."
+          }
         },
         {
           "name": "Create MARKDOWN source",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"sourceId2\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -788,6 +604,15 @@
                 "value": "application/json"
               }
             ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"MARKDOWN\",\n  \"title\": \"Cellular respiration\",\n  \"content\": \"# Cellular respiration\\n\\nConverts glucose into ATP.\\n\\n- **Glycolysis**: cytoplasm\\n- **Krebs cycle**: mitochondrial matrix\\n- **Electron transport chain**: produces most ATP\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
             "url": {
               "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources",
               "host": [
@@ -800,31 +625,67 @@
                 "sources"
               ]
             },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"type\": \"MARKDOWN\",\n  \"title\": \"Deadlocks\",\n  \"content\": \"# Deadlock\\n\\nFour conditions: mutual exclusion, hold and wait, no preemption, circular wait.\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
+            "description": ""
+          }
+        },
+        {
+          "name": "Wait until source is READY",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status is 201\", function () { pm.response.to.have.status(201); });",
-                  "if (pm.response.code < 300) { pm.collectionVariables.set(\"sourceId2\", pm.response.json().id); }"
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const status = pm.response.json().data?.status;",
+                  "const tries = Number(pm.collectionVariables.get(\"pollCount\") || 0);",
+                  "if ((status === \"PENDING\" || status === \"PROCESSING\") && tries < 45) {",
+                  "    pm.collectionVariables.set(\"pollCount\", tries + 1);",
+                  "    console.log(\"status \" + status + \", polling again (\" + (tries + 1) + \")\");",
+                  "    setTimeout(() => {}, 2000);",
+                  "    (pm.execution && pm.execution.setNextRequest ? pm.execution.setNextRequest : postman.setNextRequest)(pm.info.requestName);",
+                  "} else {",
+                  "    pm.collectionVariables.set(\"pollCount\", 0);",
+                  "    pm.test(\"reached READY (requires the Inngest dev server)\", () => pm.expect(status).to.eql(\"READY\"));",
+                  "}"
                 ]
               }
             }
-          ]
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/{{sourceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "sources",
+                "{{sourceId}}"
+              ]
+            },
+            "description": "In the Collection Runner this repeats every 2s until the source is `READY` (max ~90s). Sent by hand, it just shows the current status."
+          }
         },
         {
           "name": "List sources",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"no content in list\", () => pm.response.json().data.forEach((s) => pm.expect(s).to.not.have.property(\"content\")));"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [],
@@ -839,27 +700,28 @@
                 "{{workspaceId}}",
                 "sources"
               ]
-            }
-          },
+            },
+            "description": "Summaries only: `content` is omitted (fetch one source to get it)."
+          }
+        },
+        {
+          "name": "List sources (filtered)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));"
                 ]
               }
             }
-          ]
-        },
-        {
-          "name": "List with filters",
+          ],
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources?q=thread&type=TEXT",
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources?type=TEXT&status=READY&q=photosynthesis",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -871,586 +733,36 @@
               ],
               "query": [
                 {
-                  "key": "q",
-                  "value": "thread"
-                },
-                {
                   "key": "type",
                   "value": "TEXT"
-                }
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Get one source",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/{{sourceId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}",
-                "sources",
-                "{{sourceId}}"
-              ]
-            },
-            "description": "Status stays PENDING until Chapter 09."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "PDF type via JSON (expect 400)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}",
-                "sources"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"type\": \"PDF\",\n  \"title\": \"x\",\n  \"content\": \"y\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 400\", function () { pm.response.to.have.status(400); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Delete one source",
-          "request": {
-            "method": "DELETE",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/{{sourceId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}",
-                "sources",
-                "{{sourceId}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 204\", function () { pm.response.to.have.status(204); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Bulk delete",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/bulk-delete",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}",
-                "sources",
-                "bulk-delete"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"sourceIds\": [\n    \"{{sourceId2}}\"\n  ]\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 204\", function () { pm.response.to.have.status(204); });"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "Chapter 07 — Sources: PDF, website, YouTube",
-      "description": "Put a small sample.pdf next to this file (requests/sample.pdf) for the upload request.\nCreates its own workspace first.",
-      "item": [
-        {
-          "name": "0. Create a workspace",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"title\": \"Imports playground\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 201\", function () { pm.response.to.have.status(201); });",
-                  "if (pm.response.code < 300) { pm.collectionVariables.set(\"workspaceId\", pm.response.json().id); }"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Upload PDF",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/upload",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}",
-                "sources",
-                "upload"
-              ]
-            },
-            "description": "Postman: choose a file on the 'file' row.",
-            "body": {
-              "mode": "formdata",
-              "formdata": [
-                {
-                  "key": "title",
-                  "type": "text",
-                  "value": "Sample PDF"
                 },
                 {
-                  "key": "file",
-                  "type": "file",
-                  "src": []
+                  "key": "status",
+                  "value": "READY"
+                },
+                {
+                  "key": "q",
+                  "value": "photosynthesis"
                 }
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 201\", function () { pm.response.to.have.status(201); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Import website",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/import/website",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}",
-                "sources",
-                "import",
-                "website"
               ]
             },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"url\": \"https://en.wikipedia.org/wiki/Process_(computing)\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 201\", function () { pm.response.to.have.status(201); });"
-                ]
-              }
-            }
-          ]
+            "description": "Query: `type` (`PDF` | `WEBSITE` | `YOUTUBE` | `TEXT` | `MARKDOWN`), `status`, `q` (searches title and content)."
+          }
         },
         {
-          "name": "Import YouTube (use a video WITH captions)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/import/youtube",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}",
-                "sources",
-                "import",
-                "youtube"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"url\": \"https://www.youtube.com/watch?v=VIDEO_ID_WITH_CAPTIONS\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
+          "name": "Get source",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status is 201\", function () { pm.response.to.have.status(201); });"
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"has content\", () => pm.expect(pm.response.json().data.content).to.be.a(\"string\"));"
                 ]
               }
             }
-          ]
-        },
-        {
-          "name": "Import a web-search result",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/import/web-search",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}",
-                "sources",
-                "import",
-                "web-search"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"title\": \"Example result\",\n  \"content\": \"Some text from a search result.\",\n  \"url\": \"https://example.com/article\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 201\", function () { pm.response.to.have.status(201); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Bad YouTube URL (expect 400)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/import/youtube",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}",
-                "sources",
-                "import",
-                "youtube"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"url\": \"https://example.com/not-youtube\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 400\", function () { pm.response.to.have.status(400); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "List sources",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}",
-                "sources"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "Chapter 09 — Background jobs",
-      "description": "Keep the Inngest dev server running: npx inngest-cli@latest dev -u http://localhost:8080/api/inngest",
-      "item": [
-        {
-          "name": "0. Create a workspace",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"title\": \"Pipeline playground\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 201\", function () { pm.response.to.have.status(201); });",
-                  "if (pm.response.code < 300) { pm.collectionVariables.set(\"workspaceId\", pm.response.json().id); }"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "1. Create a TEXT source (returns PENDING)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}",
-                "sources"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"type\": \"TEXT\",\n  \"title\": \"OS notes\",\n  \"content\": \"A process is a running program with its own memory.\\n\\nA thread is a unit of execution inside a process and shares its memory.\\n\\nA deadlock happens when processes wait on each other forever.\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 201\", function () { pm.response.to.have.status(201); });",
-                  "if (pm.response.code < 300) { pm.collectionVariables.set(\"sourceId\", pm.response.json().id); }"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "2. Poll the source (repeat until READY)",
+          ],
           "request": {
             "method": "GET",
             "header": [],
@@ -1467,22 +779,23 @@
                 "{{sourceId}}"
               ]
             },
-            "description": "PENDING -> PROCESSING -> READY. Also watch http://localhost:8288"
-          },
+            "description": "Full source including `content` and `metadata`."
+          }
+        },
+        {
+          "name": "Get source chunks",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"has chunks\", () => pm.expect(pm.response.json().data.count).to.be.above(0));"
                 ]
               }
             }
-          ]
-        },
-        {
-          "name": "3. Inspect chunks",
+          ],
           "request": {
             "method": "GET",
             "header": [],
@@ -1499,163 +812,28 @@
                 "{{sourceId}}",
                 "chunks"
               ]
-            }
-          },
+            },
+            "description": "Indexed chunks: `{ chunks: [{ index, content, tokenCount, metadata: { page? } }], count }`."
+          }
+        },
+        {
+          "name": "Reprocess one source",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
+                  "pm.test(\"status 202\", () => pm.response.to.have.status(202));"
                 ]
               }
             }
-          ]
-        },
-        {
-          "name": "Reprocess one source (202)",
+          ],
           "request": {
             "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/{{sourceId}}/reprocess",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}",
-                "sources",
-                "{{sourceId}}",
-                "reprocess"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 202\", function () { pm.response.to.have.status(202); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Reprocess ALL failed sources",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/reprocess",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}",
-                "sources",
-                "reprocess"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Reprocess selected failed sources",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/reprocess",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}",
-                "sources",
-                "reprocess"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"sourceIds\": [\n    \"{{sourceId}}\"\n  ]\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Delete source (vectors are removed too)",
-          "request": {
-            "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/{{sourceId}}",
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/{{sourceId2}}/reprocess",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -1664,40 +842,150 @@
                 "workspaces",
                 "{{workspaceId}}",
                 "sources",
-                "{{sourceId}}"
+                "{{sourceId2}}",
+                "reprocess"
               ]
-            }
-          },
+            },
+            "description": "Re-runs extraction and indexing. Returns **202** immediately."
+          }
+        },
+        {
+          "name": "Reprocess all FAILED sources",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status is 204\", function () { pm.response.to.have.status(204); });"
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"returns count\", () => pm.expect(pm.response.json().data.reprocessed).to.be.a(\"number\"));"
                 ]
               }
             }
-          ]
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/reprocess",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "sources",
+                "reprocess"
+              ]
+            },
+            "description": "Body `{}` retries every `FAILED` source in the workspace; pass `sourceIds` to retry specific ones. Returns `{ reprocessed: <count> }`."
+          }
+        },
+        {
+          "name": "[400] PDF type via JSON",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"PDF\",\n  \"title\": \"x\",\n  \"content\": \"x\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "sources"
+              ]
+            },
+            "description": "PDFs must go through the upload endpoint."
+          }
         }
       ]
     },
     {
-      "name": "Chapter 10 — Chat with RAG",
-      "description": "Use a workspace that already has READY sources (paste its id, or run Chapters 06-09 first).\nStreaming responses show as raw event text; that is expected.",
+      "name": "04 · Sources: uploads & imports",
+      "description": "Need the optional integrations: **Cloudinary** (PDF), **Firecrawl** (website). They return **503** when not configured. Each counts against the ingestion rate limit (30 / 10 min).",
       "item": [
         {
-          "name": "1. First message (creates a conversation)",
+          "name": "Upload PDF",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (pm.response.code === 400 && body.error?.message === \"PDF file is required\") {",
+                  "    pm.test(\"skipped: select a PDF in the 'file' field to test uploads\", () => {});",
+                  "} else {",
+                  "    pm.test(\"status 201 (or 503 if Cloudinary is not configured)\", () => pm.expect(pm.response.code).to.be.oneOf([201, 503]));",
+                  "    if (pm.response.code === 201) { pm.collectionVariables.set(\"pdfSourceId\", pm.response.json().data.id); }",
+                  "}"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                },
+                {
+                  "key": "title",
+                  "type": "text",
+                  "value": "My PDF"
+                }
+              ]
+            },
             "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/chat",
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/upload",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -1705,35 +993,29 @@
                 "api",
                 "workspaces",
                 "{{workspaceId}}",
-                "chat"
+                "sources",
+                "upload"
               ]
             },
-            "description": "The new conversation id comes back in the X-Conversation-Id header.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"messages\": [\n    {\n      \"id\": \"1\",\n      \"role\": \"user\",\n      \"parts\": [\n        {\n          \"type\": \"text\",\n          \"text\": \"What is the difference between a process and a thread?\"\n        }\n      ]\n    }\n  ]\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });",
-                  "var v = pm.response.headers.get(\"X-Conversation-Id\"); if (v) { pm.collectionVariables.set(\"conversationId\", v); }"
-                ]
-              }
-            }
-          ]
+            "description": "**Select a PDF in the `file` field before sending.** multipart/form-data: `file` (required, PDF, ≤10 MB), `title` (optional).\n\nThe bytes are validated before storage: real `%PDF-` header, parses, ≤1000 pages, no JavaScript / launch actions / embedded files / XFA, not password-protected. Chunks keep `metadata.page`."
+          }
         },
         {
-          "name": "2. Follow-up in the same conversation",
+          "name": "Import website",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201 (or 503 if the integration is not configured)\", () => pm.expect(pm.response.code).to.be.oneOf([201, 503]));",
+                  "if (pm.response.code === 201) {",
+                  "",
+                  "}"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -1742,8 +1024,17 @@
                 "value": "application/json"
               }
             ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"https://en.wikipedia.org/wiki/Photosynthesis\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
             "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/chat",
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/import/website",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -1751,33 +1042,27 @@
                 "api",
                 "workspaces",
                 "{{workspaceId}}",
-                "chat"
+                "sources",
+                "import",
+                "website"
               ]
             },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"conversationId\": \"{{conversationId}}\",\n  \"messages\": [\n    {\n      \"id\": \"1\",\n      \"role\": \"user\",\n      \"parts\": [\n        {\n          \"type\": \"text\",\n          \"text\": \"What is the difference between a process and a thread?\"\n        }\n      ]\n    },\n    {\n      \"id\": \"2\",\n      \"role\": \"assistant\",\n      \"parts\": [\n        {\n          \"type\": \"text\",\n          \"text\": \"A process has its own memory; threads share their process's memory.\"\n        }\n      ]\n    },\n    {\n      \"id\": \"3\",\n      \"role\": \"user\",\n      \"parts\": [\n        {\n          \"type\": \"text\",\n          \"text\": \"Give me an example of when to prefer each.\"\n        }\n      ]\n    }\n  ]\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
-                ]
-              }
-            }
-          ]
+            "description": "Scrapes the page to markdown with Firecrawl. Body: `url`, optional `title`."
+          }
         },
         {
-          "name": "3. Question outside the sources (no fake citations)",
+          "name": "Import YouTube",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -1786,6 +1071,167 @@
                 "value": "application/json"
               }
             ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"https://www.youtube.com/watch?v=aircAruvnKk\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/import/youtube",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "sources",
+                "import",
+                "youtube"
+              ]
+            },
+            "description": "Imports the video transcript (the video must have captions). Body: `url`, optional `title`."
+          }
+        },
+        {
+          "name": "Import a web search result",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Chlorophyll\",\n  \"content\": \"Chlorophyll absorbs mostly blue and red light and reflects green.\",\n  \"url\": \"https://en.wikipedia.org/wiki/Chlorophyll\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/import/web-search",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "sources",
+                "import",
+                "web-search"
+              ]
+            },
+            "description": "Saves a web result (e.g. one cited as `[W1]` in chat) as a source. Body: `title`, `content`, `url`."
+          }
+        },
+        {
+          "name": "[400] Bad YouTube URL",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"https://example.com/not-a-video\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/import/youtube",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "sources",
+                "import",
+                "youtube"
+              ]
+            },
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 · Chat",
+      "description": "RAG chat over the workspace's READY sources.\n\n**Request:** `{ messages, conversationId?, model?, webSearch? }`. Only the **latest user message** is used; history is loaded from the database, so you can send just `[latestMessage]`. Omit `conversationId` to start a new conversation.\n\n**Response:** an AI SDK **UI message stream** (server-sent events, not JSON), plus the `X-Conversation-Id` header. The reply cites sources inline as `[1]`, `[2]` and web results as `[W1]`.\n\nThe assistant message is saved when the stream finishes, with only the citations actually used. Every 8 messages a background job updates the conversation summary and learns memories (Mem0).",
+      "item": [
+        {
+          "name": "Send first message",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const id = pm.response.headers.get(\"X-Conversation-Id\");",
+                  "pm.test(\"returns X-Conversation-Id\", () => pm.expect(id).to.be.a(\"string\"));",
+                  "pm.collectionVariables.set(\"conversationId\", id);",
+                  "pm.test(\"streams text\", () => pm.expect(pm.response.text()).to.include(\"text-delta\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [\n    {\n      \"id\": \"msg-1\",\n      \"role\": \"user\",\n      \"parts\": [\n        {\n          \"type\": \"text\",\n          \"text\": \"Where does the Calvin cycle happen, and what does it produce?\"\n        }\n      ]\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
             "url": {
               "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/chat",
               "host": [
@@ -1798,30 +1244,163 @@
                 "chat"
               ]
             },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"messages\": [\n    {\n      \"id\": \"1\",\n      \"role\": \"user\",\n      \"parts\": [\n        {\n          \"type\": \"text\",\n          \"text\": \"Who painted the Mona Lisa?\"\n        }\n      ]\n    }\n  ]\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
+            "description": "Starts a new conversation. Saves its id from `X-Conversation-Id`. Optional `model`: `gpt-4o-mini` (default) or `gpt-4o`."
+          }
+        },
+        {
+          "name": "Send follow-up",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));"
                 ]
               }
             }
-          ]
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"conversationId\": \"{{conversationId}}\",\n  \"messages\": [\n    {\n      \"id\": \"msg-1\",\n      \"role\": \"user\",\n      \"parts\": [\n        {\n          \"type\": \"text\",\n          \"text\": \"And where does the oxygen come from?\"\n        }\n      ]\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/chat",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "chat"
+              ]
+            },
+            "description": "Same conversation. The follow-up is rewritten into a standalone search query using the history."
+          }
         },
+        {
+          "name": "Send with web search",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"conversationId\": \"{{conversationId}}\",\n  \"webSearch\": true,\n  \"messages\": [\n    {\n      \"id\": \"msg-1\",\n      \"role\": \"user\",\n      \"parts\": [\n        {\n          \"type\": \"text\",\n          \"text\": \"Any recent research news on improving photosynthesis in crops?\"\n        }\n      ]\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/chat",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "chat"
+              ]
+            },
+            "description": "`webSearch: true` lets the model call Tavily. Web results are cited as `[W1]` and saved with `sourceType: \"WEB\"`. Silently off if Tavily is not configured."
+          }
+        },
+        {
+          "name": "[400] Empty messages",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/chat",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "chat"
+              ]
+            },
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 · Conversations",
+      "description": "Saved chat threads. A conversation has `title` (auto-set from the first message), `summary` and `summaryMessageCount` (updated by the background summary job).",
+      "item": [
         {
           "name": "List conversations",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [],
@@ -1836,22 +1415,27 @@
                 "{{workspaceId}}",
                 "conversations"
               ]
-            }
-          },
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Get messages",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const messages = pm.response.json().data;",
+                  "pm.test(\"has messages\", () => pm.expect(messages.length).to.be.above(1));",
+                  "pm.test(\"citations have markers\", () => messages.flatMap((m) => m.citations || []).forEach((c) => pm.expect(c.marker).to.be.a(\"number\")));"
                 ]
               }
             }
-          ]
-        },
-        {
-          "name": "Messages (check the citations array)",
+          ],
           "request": {
             "method": "GET",
             "header": [],
@@ -1868,22 +1452,24 @@
                 "{{conversationId}}",
                 "messages"
               ]
-            }
-          },
+            },
+            "description": "Messages in order. Assistant messages carry `citations`. **Match a citation to the `[n]` / `[Wn]` in the text by its `marker`**, not by array position. Only cited items are stored."
+          }
+        },
+        {
+          "name": "Create empty conversation",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"conversationId2\", pm.response.json().data.id);"
                 ]
               }
             }
-          ]
-        },
-        {
-          "name": "Create empty conversation",
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -1892,6 +1478,15 @@
                 "value": "application/json"
               }
             ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Exam prep\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
             "url": {
               "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/conversations",
               "host": [
@@ -1904,30 +1499,63 @@
                 "conversations"
               ]
             },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"title\": \"Manual chat\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
+            "description": "Optional `title`. Pass the returned id as `conversationId` in chat."
+          }
+        },
+        {
+          "name": "Delete conversation",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status is 201\", function () { pm.response.to.have.status(201); });"
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));"
                 ]
               }
             }
-          ]
-        },
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/conversations/{{conversationId2}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "conversations",
+                "{{conversationId2}}"
+              ]
+            },
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 · Memory",
+      "description": "Long-term facts about the user (Mem0), injected into chat when relevant. Memories are added manually here or learned automatically from conversations. Each memory has `source`: `manual` | `learned`. Needs Mem0; returns **503** when not configured.",
+      "item": [
         {
-          "name": "Empty messages (expect 400)",
+          "name": "Create memory",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201 (or 503 if the integration is not configured)\", () => pm.expect(pm.response.code).to.be.oneOf([201, 503]));",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set(\"memoryId\", pm.response.json().data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -1936,6 +1564,729 @@
                 "value": "application/json"
               }
             ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"memory\": \"Prefers short answers with real-world examples.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/memory",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "memory"
+              ]
+            },
+            "description": "Body: `memory` (1–2000 chars)."
+          }
+        },
+        {
+          "name": "List memories",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/memory",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "memory"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Update memory",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get(\"memoryId\")) {",
+                  "    pm.test(\"skipped: no memory was created (Mem0 not configured)\", () => {});",
+                  "} else {",
+                  "    pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"memory\": \"Prefers concise answers with examples.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/memory/{{memoryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "memory",
+                "{{memoryId}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "[400] Empty memory",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"memory\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/memory",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "memory"
+              ]
+            },
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "08 · Artifacts",
+      "description": "Learning material generated from the workspace's READY sources by a background job. Creating one returns it `PENDING`; poll until `READY` (or `FAILED`).\n\nBody: `type` (`SUMMARY` | `TAKEAWAYS` | `FLASHCARDS` | `QUIZ` | `MINDMAP` | `REPORT`), optional `title`, optional `sourceIds` (defaults to all READY sources). Returns **400** if there are no READY sources.\n\n`content` by type: SUMMARY `{ markdown }` · TAKEAWAYS `{ items[] }` · FLASHCARDS `{ cards[{ front, back }] }` · QUIZ `{ questions[{ question, options[], correctIndex, explanation }] }` · MINDMAP `{ nodes[{ id, label }], edges[{ id, source, target }] }` · REPORT `{ markdown, sections[{ title, content }] }`.",
+      "item": [
+        {
+          "name": "Create SUMMARY",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"artifactId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"SUMMARY\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/artifacts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "artifacts"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Create TAKEAWAYS",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"TAKEAWAYS\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/artifacts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "artifacts"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Create FLASHCARDS",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"FLASHCARDS\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/artifacts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "artifacts"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Create MINDMAP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"MINDMAP\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/artifacts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "artifacts"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Create REPORT",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"REPORT\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/artifacts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "artifacts"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Create QUIZ (custom title, selected sources)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"QUIZ\",\n  \"title\": \"Photosynthesis quiz\",\n  \"sourceIds\": [\n    \"{{sourceId}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/artifacts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "artifacts"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Wait until artifact is READY",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const status = pm.response.json().data?.status;",
+                  "const tries = Number(pm.collectionVariables.get(\"pollCount\") || 0);",
+                  "if ((status === \"PENDING\" || status === \"PROCESSING\") && tries < 45) {",
+                  "    pm.collectionVariables.set(\"pollCount\", tries + 1);",
+                  "    console.log(\"status \" + status + \", polling again (\" + (tries + 1) + \")\");",
+                  "    setTimeout(() => {}, 2000);",
+                  "    (pm.execution && pm.execution.setNextRequest ? pm.execution.setNextRequest : postman.setNextRequest)(pm.info.requestName);",
+                  "} else {",
+                  "    pm.collectionVariables.set(\"pollCount\", 0);",
+                  "    pm.test(\"reached READY (requires the Inngest dev server)\", () => pm.expect(status).to.eql(\"READY\"));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/artifacts/{{artifactId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "artifacts",
+                "{{artifactId}}"
+              ]
+            },
+            "description": "Polls in the Collection Runner (every 2s, max ~90s)."
+          }
+        },
+        {
+          "name": "Get artifact",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/artifacts/{{artifactId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "artifacts",
+                "{{artifactId}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "List artifacts",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/artifacts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "artifacts"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "[400] Unknown type",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"POEM\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/artifacts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "artifacts"
+              ]
+            },
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 · Cross-user isolation",
+      "description": "Signs in as a second user (B) and confirms user A's data is invisible to them (**404**, not 403, so ids can't be probed), then signs back in as A. The session cookie switches users, so run these in order.",
+      "item": [
+        {
+          "name": "Sign up user B",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"emailB\", \"user-b-\" + Date.now() + \"@test.local\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Other User\",\n  \"email\": \"{{emailB}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/sign-up/email",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "sign-up",
+                "email"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "B: get A's workspace → 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "B: get A's source → 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/{{sourceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "sources",
+                "{{sourceId}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "B: chat in A's workspace → 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [\n    {\n      \"id\": \"msg-1\",\n      \"role\": \"user\",\n      \"parts\": [\n        {\n          \"type\": \"text\",\n          \"text\": \"hi\"\n        }\n      ]\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
             "url": {
               "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/chat",
               "host": [
@@ -1948,30 +2299,173 @@
                 "chat"
               ]
             },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"messages\": []\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
+            "description": ""
+          }
+        },
+        {
+          "name": "B: delete A's memory → 404",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status is 400\", function () { pm.response.to.have.status(400); });"
+                  "if (!pm.collectionVariables.get(\"memoryId\")) {",
+                  "    pm.test(\"skipped: no memory was created (Mem0 not configured)\", () => {});",
+                  "} else {",
+                  "    pm.test(\"status 404\", () => pm.response.to.have.status(404));",
+                  "}"
                 ]
               }
             }
-          ]
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/memory/{{memoryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "memory",
+                "{{memoryId}}"
+              ]
+            },
+            "description": "Skip if Mem0 is not configured (no memory was created)."
+          }
+        },
+        {
+          "name": "Sign back in as A",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{emailA}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/sign-in/email",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "sign-in",
+                "email"
+              ]
+            },
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "10 · Cleanup",
+      "description": "Deletes everything created above. Deleting a workspace also deletes its sources, conversations, artifacts and Pinecone vectors.",
+      "item": [
+        {
+          "name": "Delete artifact",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/artifacts/{{artifactId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "artifacts",
+                "{{artifactId}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Delete memory",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get(\"memoryId\")) {",
+                  "    pm.test(\"skipped: no memory was created (Mem0 not configured)\", () => {});",
+                  "} else {",
+                  "    pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/memory/{{memoryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "memory",
+                "{{memoryId}}"
+              ]
+            },
+            "description": ""
+          }
         },
         {
           "name": "Delete conversation",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "DELETE",
             "header": [],
@@ -1987,347 +2481,55 @@
                 "conversations",
                 "{{conversationId}}"
               ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 204\", function () { pm.response.to.have.status(204); });"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "Chapter 11 — Web search",
-      "description": "Needs TAVILY_API_KEY in .env. Use a workspace id (paste).",
-      "item": [
-        {
-          "name": "Chat with webSearch: true",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/chat",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}",
-                "chat"
-              ]
             },
-            "description": "Look for a tool-call part in the stream and [W1] in the text.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"webSearch\": true,\n  \"messages\": [\n    {\n      \"id\": \"1\",\n      \"role\": \"user\",\n      \"parts\": [\n        {\n          \"type\": \"text\",\n          \"text\": \"What were the latest announcements from OpenAI this week?\"\n        }\n      ]\n    }\n  ]\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });",
-                  "var v = pm.response.headers.get(\"X-Conversation-Id\"); if (v) { pm.collectionVariables.set(\"conversationId\", v); }"
-                ]
-              }
-            }
-          ]
+            "description": ""
+          }
         },
         {
-          "name": "Same question with webSearch: false",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/chat",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}",
-                "chat"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"webSearch\": false,\n  \"messages\": [\n    {\n      \"id\": \"1\",\n      \"role\": \"user\",\n      \"parts\": [\n        {\n          \"type\": \"text\",\n          \"text\": \"What were the latest announcements from OpenAI this week?\"\n        }\n      ]\n    }\n  ]\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
+          "name": "Delete source",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));"
                 ]
               }
             }
-          ]
-        },
-        {
-          "name": "Saved messages (citations should include sourceType WEB)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/conversations/{{conversationId}}/messages",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}",
-                "conversations",
-                "{{conversationId}}",
-                "messages"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "Chapter 12 — Long-term memory",
-      "description": "Needs MEM0_API_KEY in .env.",
-      "item": [
-        {
-          "name": "Create manual memory",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/memory",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "memory"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"memory\": \"I am preparing for the GATE CS exam and prefer concise answers.\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 201\", function () { pm.response.to.have.status(201); });",
-                  "if (pm.response.code < 300) { pm.collectionVariables.set(\"memoryId\", pm.response.json().id); }"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "List memories",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/memory",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "memory"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Update memory",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/memory/{{memoryId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "memory",
-                "{{memoryId}}"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"memory\": \"I am preparing for GATE CS 2027.\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Empty memory (expect 400)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/memory",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "memory"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"memory\": \"\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 400\", function () { pm.response.to.have.status(400); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Delete memory",
+          ],
           "request": {
             "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/memory/{{memoryId}}",
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/{{sourceId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
-                "memory",
-                "{{memoryId}}"
+                "workspaces",
+                "{{workspaceId}}",
+                "sources",
+                "{{sourceId}}"
               ]
-            }
-          },
+            },
+            "description": "Also removes the source's vectors."
+          }
+        },
+        {
+          "name": "Bulk delete sources",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status is 204\", function () { pm.response.to.have.status(204); });"
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));"
                 ]
               }
             }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "Chapter 13 — Conversation summaries",
-      "description": "Temporarily set CONVERSATION_SUMMARY_INTERVAL = 2 in ai-config.ts, then run the first request and check the Inngest dashboard.",
-      "item": [
-        {
-          "name": "1. Send a chat message (2 messages saved -> summary job)",
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -2336,48 +2538,17 @@
                 "value": "application/json"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/chat",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}",
-                "chat"
-              ]
-            },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"messages\": [\n    {\n      \"id\": \"1\",\n      \"role\": \"user\",\n      \"parts\": [\n        {\n          \"type\": \"text\",\n          \"text\": \"Explain deadlocks and how to prevent them.\"\n        }\n      ]\n    }\n  ]\n}",
+              "raw": "{\n  \"sourceIds\": [\n    \"{{sourceId2}}\"\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });",
-                  "var v = pm.response.headers.get(\"X-Conversation-Id\"); if (v) { pm.collectionVariables.set(\"conversationId\", v); }"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "2. List conversations (look for summary + summaryMessageCount)",
-          "request": {
-            "method": "GET",
-            "header": [],
+            },
             "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/conversations",
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/bulk-delete",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -2385,522 +2556,145 @@
                 "api",
                 "workspaces",
                 "{{workspaceId}}",
-                "conversations"
+                "sources",
+                "bulk-delete"
               ]
             },
-            "description": "Give the background job a few seconds."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "Chapter 14 — Learning artifacts",
-      "description": "Use a workspace with READY sources (paste its id).\nCreate one artifact, then poll it until status is READY.",
-      "item": [
-        {
-          "name": "Create SUMMARY",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/artifacts",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}",
-                "artifacts"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"type\": \"SUMMARY\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 201\", function () { pm.response.to.have.status(201); });",
-                  "if (pm.response.code < 300) { pm.collectionVariables.set(\"artifactId\", pm.response.json().id); }"
-                ]
-              }
-            }
-          ]
+            "description": "Body: `sourceIds` (at least one)."
+          }
         },
         {
-          "name": "Create TAKEAWAYS",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/artifacts",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}",
-                "artifacts"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"type\": \"TAKEAWAYS\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
+          "name": "Delete workspace",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status is 201\", function () { pm.response.to.have.status(201); });",
-                  "if (pm.response.code < 300) { pm.collectionVariables.set(\"artifactId\", pm.response.json().id); }"
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));"
                 ]
               }
             }
-          ]
-        },
-        {
-          "name": "Create FLASHCARDS",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/artifacts",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}",
-                "artifacts"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"type\": \"FLASHCARDS\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 201\", function () { pm.response.to.have.status(201); });",
-                  "if (pm.response.code < 300) { pm.collectionVariables.set(\"artifactId\", pm.response.json().id); }"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Create QUIZ (custom title)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/artifacts",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}",
-                "artifacts"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"type\": \"QUIZ\",\n  \"title\": \"Midterm quiz\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 201\", function () { pm.response.to.have.status(201); });",
-                  "if (pm.response.code < 300) { pm.collectionVariables.set(\"artifactId\", pm.response.json().id); }"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Create MINDMAP",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/artifacts",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}",
-                "artifacts"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"type\": \"MINDMAP\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 201\", function () { pm.response.to.have.status(201); });",
-                  "if (pm.response.code < 300) { pm.collectionVariables.set(\"artifactId\", pm.response.json().id); }"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Create REPORT",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/artifacts",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}",
-                "artifacts"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"type\": \"REPORT\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 201\", function () { pm.response.to.have.status(201); });",
-                  "if (pm.response.code < 300) { pm.collectionVariables.set(\"artifactId\", pm.response.json().id); }"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Poll artifact (until READY)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/artifacts/{{artifactId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}",
-                "artifacts",
-                "{{artifactId}}"
-              ]
-            },
-            "description": "Postman polls the artifact you created last; the .http file polls the FLASHCARDS one. content is filled when READY."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "List artifacts",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/artifacts",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}",
-                "artifacts"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 200\", function () { pm.response.to.have.status(200); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Unknown type (expect 400)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/artifacts",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{workspaceId}}",
-                "artifacts"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"type\": \"POEM\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 400\", function () { pm.response.to.have.status(400); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Empty workspace for the no-sources case",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"title\": \"Empty workspace\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 201\", function () { pm.response.to.have.status(201); });",
-                  "if (pm.response.code < 300) { pm.collectionVariables.set(\"emptyWorkspaceId\", pm.response.json().id); }"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Artifact with no READY sources (expect 400)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{emptyWorkspaceId}}/artifacts",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspaces",
-                "{{emptyWorkspaceId}}",
-                "artifacts"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"type\": \"SUMMARY\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 400\", function () { pm.response.to.have.status(400); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Delete artifact",
+          ],
           "request": {
             "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/artifacts/{{artifactId}}",
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
                 "workspaces",
-                "{{workspaceId}}",
-                "artifacts",
-                "{{artifactId}}"
+                "{{workspaceId}}"
               ]
-            }
-          },
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "[404] Get deleted workspace",
           "event": [
             {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status is 204\", function () { pm.response.to.have.status(204); });"
+                  "pm.test(\"status 404\", () => pm.response.to.have.status(404));"
                 ]
               }
             }
-          ]
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Sign out",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/sign-out",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "sign-out"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "[401] Current user after sign-out",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "me"
+              ]
+            },
+            "description": ""
+          }
         }
       ]
     }
