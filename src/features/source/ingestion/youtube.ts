@@ -5,6 +5,7 @@
 import { YoutubeTranscript } from "youtube-transcript";
 import { APIError } from "../../../shared/http/api-error.js";
 
+/** Fetches YouTube transcripts. */
 export class YoutubeClient {
     /**
      * Fetches caption transcript text for a YouTube video.

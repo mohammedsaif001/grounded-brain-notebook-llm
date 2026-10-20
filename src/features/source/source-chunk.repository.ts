@@ -1,6 +1,7 @@
 import type { Prisma } from "../../generated/prisma/client.js";
 import prisma from "../../config/db.js";
 
+/** Columns returned for every chunk query. */
 export const sourceChunkSelect = {
     id: true,
     sourceId: true,
@@ -11,10 +12,12 @@ export const sourceChunkSelect = {
     createdAt: true,
 } as const;
 
+/** A chunk row as returned by this repository. */
 export type SourceChunkRecord = Prisma.SourceChunkGetPayload<{
     select: typeof sourceChunkSelect;
 }>;
 
+/** Fields needed to insert a chunk; `index` is its position within the source. */
 export type CreateSourceChunkData = {
     sourceId: string;
     index: number;
@@ -25,6 +28,11 @@ export type CreateSourceChunkData = {
 
 /** Data access for source chunks (Postgres). */
 export class SourceChunkRepository {
+    /**
+     * Returns every chunk of a source in order.
+     *
+     * @param sourceId - Source whose chunks to read
+     */
     static findAllBySourceId(sourceId: string) {
         return prisma.sourceChunk.findMany({
             where: { sourceId },
@@ -33,6 +41,12 @@ export class SourceChunkRepository {
         });
     }
 
+    /**
+     * Inserts chunks in a single transaction.
+     *
+     * @param chunks - Chunks to insert; an empty array is a no-op
+     * @returns The created chunks
+     */
     static createMany(chunks: CreateSourceChunkData[]) {
         if (chunks.length === 0) {
             return Promise.resolve([]);
@@ -54,6 +68,11 @@ export class SourceChunkRepository {
         );
     }
 
+    /**
+     * Deletes every chunk of a source.
+     *
+     * @param sourceId - Source whose chunks to delete
+     */
     static deleteAllBySourceId(sourceId: string) {
         return prisma.sourceChunk.deleteMany({
             where: { sourceId },

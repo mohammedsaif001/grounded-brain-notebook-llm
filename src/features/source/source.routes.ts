@@ -4,7 +4,13 @@ import { ingestionRateLimiter } from "../../shared/middleware/rate-limit.middlew
 import { SourceController } from "./source.controller.js";
 import { uploadSinglePdf } from "./source.middleware.js";
 
-/** `/api/workspaces/:workspaceId/sources` */
+/**
+ * `/api/workspaces/:workspaceId/sources`
+ *
+ * Static paths (`/upload`, `/import/*`, `/bulk-delete`, `/reprocess`) are registered before
+ * `/:sourceId` so they aren't captured as ids. Routes that scrape, upload or embed are
+ * rate limited per user.
+ */
 export const sourceRouter = Router({ mergeParams: true });
 
 sourceRouter.get("/", asyncHandler(SourceController.list));

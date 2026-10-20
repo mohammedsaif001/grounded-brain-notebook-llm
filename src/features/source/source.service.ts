@@ -20,7 +20,12 @@ import { WorkspaceService } from "../workspace/workspace.service.js";
 
 /** Source business logic: imports, CRUD, and (re)processing requests. */
 export class SourceService {
-    /** Persists a source row and queues the processing pipeline. */
+    /**
+     * Persists a source row and queues the processing pipeline.
+     *
+     * @param data - Source fields to insert
+     * @returns The created source (status `PENDING`)
+     */
     private static async createAndQueue(data: CreateSourceData) {
         const source = await SourceRepository.create(data);
 
@@ -32,7 +37,13 @@ export class SourceService {
         return source;
     }
 
-    /** Lists sources (without content) with optional `q`, `type`, and `status` filters. */
+    /**
+     * Lists sources (without content) with optional `q`, `type`, and `status` filters.
+     *
+     * @param workspaceId - Workspace to list from
+     * @param userId - Requesting user; must own the workspace
+     * @param filters - Optional list filters
+     */
     static async list(workspaceId: string, userId: string, filters: ListSourcesQuery = {}) {
         await WorkspaceService.getForUser(workspaceId, userId);
         return SourceRepository.findAllByWorkspaceId(workspaceId, filters);
@@ -41,6 +52,10 @@ export class SourceService {
     /**
      * Loads a single source after verifying workspace ownership.
      *
+     * @param workspaceId - Workspace the source belongs to
+     * @param sourceId - Source to load
+     * @param userId - Requesting user
+     * @returns The source including its content
      * @throws {APIError} NotFound when the source does not exist in this workspace
      */
     static async get(workspaceId: string, sourceId: string, userId: string): Promise<SourceRecord> {
@@ -58,6 +73,8 @@ export class SourceService {
     /**
      * Lists READY sources (without content). For internal callers such as artifact
      * generation; does no ownership check, so callers must verify the workspace first.
+     *
+     * @param workspaceId - Workspace to list from
      */
     static listReady(workspaceId: string) {
         return SourceRepository.findAllByWorkspaceId(workspaceId, { status: "READY" });
@@ -66,12 +83,20 @@ export class SourceService {
     /**
      * Lists READY sources including their full text. Internal use only (no ownership check);
      * called from background jobs and after the caller has verified the workspace.
+     *
+     * @param workspaceId - Workspace to list from
      */
     static listReadyWithContent(workspaceId: string) {
         return SourceRepository.findAllWithContentByWorkspaceId(workspaceId, { status: "READY" });
     }
 
-    /** Creates a plain-text or markdown source and queues it for indexing. */
+    /**
+     * Creates a plain-text or markdown source and queues it for indexing.
+     *
+     * @param workspaceId - Workspace to add the source to
+     * @param userId - Requesting user; must own the workspace
+     * @param input - Type, title and content
+     */
     static async createText(workspaceId: string, userId: string, input: CreateSourceInput) {
         await WorkspaceService.getForUser(workspaceId, userId);
 
@@ -90,6 +115,10 @@ export class SourceService {
      *
      * If upload-time extraction fails, the worker retries it from Cloudinary.
      *
+     * @param workspaceId - Workspace to add the source to
+     * @param userId - Requesting user; must own the workspace
+     * @param file - Uploaded file from Multer (in memory)
+     * @param title - Optional title; defaults to the sanitised file name
      * @throws {APIError} BadRequest when the file isn't a real PDF or contains active content
      */
     static async uploadPdf(
@@ -135,7 +164,14 @@ export class SourceService {
         });
     }
 
-    /** Scrapes a website and creates a WEBSITE source from its markdown. */
+    /**
+     * Scrapes a website and creates a WEBSITE source from its markdown.
+     *
+     * @param workspaceId - Workspace to add the source to
+     * @param userId - Requesting user; must own the workspace
+     * @param input - URL and optional title
+     * @throws {APIError} BadRequest when no content can be extracted
+     */
     static async importWebsite(workspaceId: string, userId: string, input: ImportWebsiteInput) {
         await WorkspaceService.getForUser(workspaceId, userId);
 
@@ -154,7 +190,14 @@ export class SourceService {
         });
     }
 
-    /** Fetches a YouTube transcript and creates a YOUTUBE source from it. */
+    /**
+     * Fetches a YouTube transcript and creates a YOUTUBE source from it.
+     *
+     * @param workspaceId - Workspace to add the source to
+     * @param userId - Requesting user; must own the workspace
+     * @param input - Video URL and optional title
+     * @throws {APIError} BadRequest when the URL is invalid or has no transcript
+     */
     static async importYoutube(workspaceId: string, userId: string, input: ImportYoutubeInput) {
         await WorkspaceService.getForUser(workspaceId, userId);
 
@@ -173,7 +216,13 @@ export class SourceService {
         });
     }
 
-    /** Saves a web search result the user chose to keep as a WEBSITE source. */
+    /**
+     * Saves a web search result the user chose to keep as a WEBSITE source.
+     *
+     * @param workspaceId - Workspace to add the source to
+     * @param userId - Requesting user; must own the workspace
+     * @param input - Title, text content and URL of the result
+     */
     static async importWebSearch(workspaceId: string, userId: string, input: ImportWebSearchInput) {
         await WorkspaceService.getForUser(workspaceId, userId);
 
@@ -194,6 +243,9 @@ export class SourceService {
     /**
      * Deletes a source, cancelling its processing run and removing its vectors and chunks.
      *
+     * @param workspaceId - Workspace the source belongs to
+     * @param sourceId - Source to delete
+     * @param userId - Requesting user
      * @throws {APIError} NotFound when the source is not found
      */
     static async delete(workspaceId: string, sourceId: string, userId: string) {
@@ -203,7 +255,14 @@ export class SourceService {
         await SourceRepository.delete(sourceId);
     }
 
-    /** Deletes multiple sources in sequence. */
+    /**
+     * Deletes multiple sources in sequence.
+     *
+     * @param workspaceId - Workspace the sources belong to
+     * @param userId - Requesting user
+     * @param sourceIds - Sources to delete
+     * @throws {APIError} NotFound if any source is missing (earlier ones stay deleted)
+     */
     static async bulkDelete(workspaceId: string, userId: string, sourceIds: string[]) {
         await WorkspaceService.getForUser(workspaceId, userId);
 
@@ -212,7 +271,14 @@ export class SourceService {
         }
     }
 
-    /** Returns indexed chunks for a source (debugging / admin UI). */
+    /**
+     * Returns indexed chunks for a source (debugging / admin UI).
+     *
+     * @param workspaceId - Workspace the source belongs to
+     * @param sourceId - Source whose chunks to read
+     * @param userId - Requesting user
+     * @returns The chunks and their count
+     */
     static async getChunks(workspaceId: string, sourceId: string, userId: string) {
         await this.get(workspaceId, sourceId, userId);
         return SourceProcessingService.listChunks(sourceId);
@@ -221,6 +287,9 @@ export class SourceService {
     /**
      * Clears a source's vectors/chunks and re-queues it for full re-indexing.
      *
+     * @param workspaceId - Workspace the source belongs to
+     * @param sourceId - Source to re-index
+     * @param userId - Requesting user
      * @throws {APIError} NotFound when the source is not found
      */
     static async reprocess(workspaceId: string, sourceId: string, userId: string) {
@@ -249,6 +318,9 @@ export class SourceService {
      * Re-queues FAILED sources. Without `sourceIds`, every failed source in the workspace
      * is reprocessed; with them, only the failed sources in that list.
      *
+     * @param workspaceId - Workspace to search for failed sources
+     * @param userId - Requesting user; must own the workspace
+     * @param input.sourceIds - Optional subset of source ids
      * @returns Count of sources that were requeued
      */
     static async reprocessFailed(

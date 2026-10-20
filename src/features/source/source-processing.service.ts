@@ -41,12 +41,23 @@ export type SourceMetadata = {
     indexedAt?: string;
 };
 
-/** Reads `metadata` as an object, tolerating null or malformed JSON. */
+/**
+ * Reads `metadata` as an object, tolerating null or malformed JSON.
+ *
+ * @param metadata - Raw JSON column value
+ * @returns The metadata, or an empty object when it isn't a plain object
+ */
 function readMetadata(metadata: SourceRecord["metadata"]): SourceMetadata {
     return metadata && typeof metadata === "object" && !Array.isArray(metadata) ? metadata : {};
 }
 
+/** The steps of the source indexing pipeline, plus index cleanup helpers. */
 export class SourceProcessingService {
+    /**
+     * Sets a source's status to `PROCESSING`.
+     *
+     * @param sourceId - Source being processed
+     */
     static markProcessing(sourceId: string) {
         return SourceRepository.update(sourceId, { status: "PROCESSING" });
     }
@@ -54,6 +65,9 @@ export class SourceProcessingService {
     /**
      * Marks a source as `FAILED` and stores the error message in metadata.
      * No-op if the source was deleted meanwhile.
+     *
+     * @param sourceId - Source that failed
+     * @param error - The failure; its message is shown to the user
      */
     static async markFailed(sourceId: string, error: unknown) {
         const source = await SourceRepository.findById(sourceId);
@@ -80,6 +94,8 @@ export class SourceProcessingService {
      *    only used when the PDF has no `fileUrl`.
      * 2. **Text already in DB** — `source.content` (TEXT, website scrape, YouTube transcript, etc.)
      *
+     * @param source - Source to read text from
+     * @returns Full text and, for PDFs, the page count and per-page text
      * @throws If the source has no content at all
      */
     private static async extractText(source: SourceRecord) {
@@ -113,6 +129,7 @@ export class SourceProcessingService {
      * Extraction and chunking happen together so the full text and PDF pages never
      * pass through Inngest step state (which is size-limited).
      *
+     * @param sourceId - Source to extract and chunk
      * @returns Number of chunks saved
      */
     static async extractAndChunk(sourceId: string) {
@@ -155,7 +172,13 @@ export class SourceProcessingService {
         return { chunkCount: saved.length };
     }
 
-    /** Embeds chunks in batches and builds Pinecone records with retrieval metadata. */
+    /**
+     * Embeds chunks in batches and builds Pinecone records with retrieval metadata.
+     *
+     * @param source - Source the chunks belong to
+     * @param chunks - Saved chunks to embed
+     * @returns One Pinecone record per chunk, keyed by the chunk id
+     */
     private static async buildVectorRecords(source: SourceRecord, chunks: SourceChunkRecord[]) {
         const records: PineconeRecord<VectorMetadata>[] = [];
 
@@ -199,6 +222,7 @@ export class SourceProcessingService {
      * Pinecone metadata includes enough context for retrieval without re-querying Postgres:
      * `sourceTitle`, `sourceType`, chunk `text` (truncated to 35k chars), and optional `page`.
      *
+     * @param sourceId - Source to index
      * @returns Updated source, or `null` if the source was deleted mid-run
      */
     static async index(sourceId: string) {
@@ -232,13 +256,22 @@ export class SourceProcessingService {
         });
     }
 
-    /** Removes a source's vectors and chunks (before delete or full re-index). */
+    /**
+     * Removes a source's vectors and chunks (before delete or full re-index).
+     *
+     * @param workspaceId - Pinecone namespace holding the vectors
+     * @param sourceId - Source to clear
+     */
     static async removeFromIndex(workspaceId: string, sourceId: string) {
         await VectorRepository.deleteBySourceId(workspaceId, sourceId);
         await SourceChunkRepository.deleteAllBySourceId(sourceId);
     }
 
-    /** Returns all chunks for a source plus the total count. */
+    /**
+     * Returns all chunks for a source plus the total count.
+     *
+     * @param sourceId - Source whose chunks to list
+     */
     static async listChunks(sourceId: string) {
         const chunks = await SourceChunkRepository.findAllBySourceId(sourceId);
         return { chunks, count: chunks.length };

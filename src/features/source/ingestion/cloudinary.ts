@@ -14,6 +14,7 @@ export type CloudinaryUploadResult = {
     resourceType: "raw" | "image";
 };
 
+/** Subset of Cloudinary's upload API response that we read. */
 type CloudinaryUploadResponse = {
     secure_url: string;
     public_id: string;
@@ -22,10 +23,13 @@ type CloudinaryUploadResponse = {
     error?: { message: string };
 };
 
+/** Stores uploaded PDFs on Cloudinary and produces download URLs. */
 export class CloudinaryStorage {
     /**
      * Builds a signed download URL for a private asset.
      *
+     * @param publicId - Cloudinary public id of the asset
+     * @param resourceType - Cloudinary resource type (`raw` for PDFs)
      * @returns The signed URL, or `null` when API credentials are not configured
      */
     static getSignedDownloadUrl(publicId: string, resourceType: "raw" | "image" = "raw") {

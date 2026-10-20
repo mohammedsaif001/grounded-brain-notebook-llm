@@ -16,22 +16,32 @@
  * http://localhost:3000, must match the server's CLIENT_URL).
  */
 
+/** Server under test. */
 const BASE_URL = process.env.SMOKE_BASE_URL ?? "http://localhost:8080";
+/** Sent as the `Origin` header so CORS and Better Auth accept the requests. */
 const ORIGIN = process.env.SMOKE_ORIGIN ?? "http://localhost:3000";
 
+/** CLI flags, e.g. `--no-ai`, `--external`, `--keep`. */
 const args = new Set(process.argv.slice(2));
+/** Run flows that call OpenAI (disabled by `--no-ai`). */
 const AI = !args.has("--no-ai");
+/** Also exercise PDF upload, website, YouTube and web search imports (`--external`). */
 const EXTERNAL = args.has("--external");
+/** Leave created workspaces in place for inspection (`--keep`). */
 const KEEP = args.has("--keep");
 
+/** Delay between status polls. */
 const POLL_INTERVAL_MS = 2_000;
+/** How long to wait for a source to finish indexing. */
 const SOURCE_TIMEOUT_MS = 90_000;
+/** How long to wait for an artifact to finish generating. */
 const ARTIFACT_TIMEOUT_MS = 180_000;
 
 // ---------------------------------------------------------------------------
 // HTTP client with a cookie jar (Better Auth sessions are cookie-based)
 // ---------------------------------------------------------------------------
 
+/** A response from the API, with the JSON envelope pre-parsed. */
 type ApiResponse = {
     status: number;
     headers: Headers;
@@ -44,11 +54,23 @@ type ApiResponse = {
     text: string;
 };
 
+/** HTTP client for one signed-in user; keeps cookies between requests. */
 class Client {
+    /** Cookies set by the server (session), replayed on every request. */
     private cookies = new Map<string, string>();
 
+    /** @param label - Name used in logs, e.g. `A` or `B` */
     constructor(readonly label: string) {}
 
+    /**
+     * Sends a request and stores any cookies the server sets.
+     *
+     * @param method - HTTP method
+     * @param path - Path beginning with `/`, appended to {@link BASE_URL}
+     * @param options.json - Body sent as JSON
+     * @param options.form - Multipart body (used for PDF upload)
+     * @returns Status, headers, parsed JSON (or `null`) and raw text
+     */
     async request(
         method: string,
         path: string,
@@ -89,9 +111,13 @@ class Client {
         return { status: res.status, headers: res.headers, body: parsed, text };
     }
 
+    /** GET `path`. */
     get = (path: string) => this.request("GET", path);
+    /** POST `path` with a JSON body (defaults to `{}`). */
     post = (path: string, json?: unknown) => this.request("POST", path, { json: json ?? {} });
+    /** PATCH `path` with a JSON body. */
     patch = (path: string, json: unknown) => this.request("PATCH", path, { json });
+    /** DELETE `path`. */
     delete = (path: string) => this.request("DELETE", path);
 }
 
@@ -99,8 +125,10 @@ class Client {
 // Tiny test runner
 // ---------------------------------------------------------------------------
 
+/** Thrown inside a step to mark it skipped (e.g. an integration isn't configured). */
 class Skip extends Error {}
 
+/** Outcome of one step, collected for the final summary. */
 type Result = {
     section: string;
     name: string;
@@ -108,23 +136,49 @@ type Result = {
     ms: number;
     detail?: string;
 };
+/** Every step result so far. */
 const results: Result[] = [];
+/** Title of the section currently running (see {@link begin}). */
 let section = "";
 
+/**
+ * Assertion helper.
+ *
+ * @param condition - Must be truthy
+ * @param message - Failure message
+ * @throws {Error} When `condition` is falsy
+ */
 function expect(condition: unknown, message: string): asserts condition {
     if (!condition) throw new Error(message);
 }
 
+/**
+ * Asserts the HTTP status, including the API error code and message in the failure text.
+ *
+ * @param res - Response to check
+ * @param expected - Expected HTTP status
+ */
 function expectStatus(res: ApiResponse, expected: number) {
     const error = res.body?.error ? ` ${res.body.error.code}: ${res.body.error.message}` : "";
     expect(res.status === expected, `expected ${expected}, got ${res.status}${error}`);
 }
 
-/** Integrations that aren't configured return 503; treat that as a skip, not a failure. */
+/**
+ * Integrations that aren't configured return 503; treat that as a skip, not a failure.
+ *
+ * @param res - Response to inspect
+ * @throws {Skip} When the status is 503
+ */
 function skipIfNotConfigured(res: ApiResponse) {
     if (res.status === 503) throw new Skip(res.body?.error?.message ?? "not configured");
 }
 
+/**
+ * Runs one named check, records PASS / FAIL / SKIP and prints the result. Never throws.
+ *
+ * @param name - Description shown in the output
+ * @param fn - The check; may return a short detail string
+ */
 async function step(name: string, fn: () => Promise<string | void>) {
     const started = Date.now();
     try {
@@ -155,13 +209,29 @@ async function step(name: string, fn: () => Promise<string | void>) {
     }
 }
 
+/**
+ * Starts a new output section.
+ *
+ * @param title - Section heading
+ */
 function begin(title: string) {
     section = title;
     console.log(`\n\x1b[1m${title}\x1b[0m`);
 }
 
+/** Resolves after `ms` milliseconds. */
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Repeatedly fetches state until `isDone` is satisfied.
+ *
+ * @param fetchState - Loads the current state
+ * @param isDone - Returns `true` once the state is final
+ * @param timeoutMs - Give up after this long
+ * @param timeoutHint - Troubleshooting hint added to the timeout error
+ * @returns The final state
+ * @throws {Error} When the timeout elapses
+ */
 async function poll<T>(
     fetchState: () => Promise<T>,
     isDone: (state: T) => boolean,
@@ -178,8 +248,17 @@ async function poll<T>(
     }
 }
 
+/** Hint shown when a background job never finishes. */
 const INNGEST_HINT = "is the Inngest dev server running (npx inngest-cli@latest dev)?";
 
+/**
+ * Waits for a source to be indexed and asserts that it ended `READY`.
+ *
+ * @param client - Signed-in client that owns the workspace
+ * @param workspaceId - Workspace containing the source
+ * @param sourceId - Source to wait for
+ * @returns The READY source
+ */
 async function waitForSource(client: Client, workspaceId: string, sourceId: string) {
     const source = await poll(
         async () =>
@@ -195,7 +274,13 @@ async function waitForSource(client: Client, workspaceId: string, sourceId: stri
     return source;
 }
 
-/** Reads the AI SDK UI message stream and returns the assistant's text. */
+/**
+ * Reads the AI SDK UI message stream and returns the assistant's text.
+ *
+ * @param text - Raw `data: ...` server-sent-event body
+ * @returns The concatenated text deltas
+ * @throws {Error} When the stream contains an error chunk
+ */
 function readChatStream(text: string) {
     let reply = "";
     for (const line of text.split("\n")) {
@@ -211,13 +296,19 @@ function readChatStream(text: string) {
     return reply;
 }
 
+/** Builds a `useChat`-style user message with a single text part. */
 const userMessage = (text: string) => ({
     id: crypto.randomUUID(),
     role: "user",
     parts: [{ type: "text", text }],
 });
 
-/** Builds a minimal valid one-page PDF containing `text`. */
+/**
+ * Builds a minimal valid one-page PDF containing `text`.
+ *
+ * @param text - Text drawn on the page (must not contain unescaped parentheses)
+ * @returns PDF bytes
+ */
 function buildPdf(text: string) {
     const content = `BT /F1 18 Tf 72 720 Td (${text}) Tj ET`;
     const objects = [
@@ -244,11 +335,16 @@ function buildPdf(text: string) {
 // Test data
 // ---------------------------------------------------------------------------
 
+/** Makes this run's users unique. */
 const RUN_ID = Date.now();
+/** Password for the throwaway test users. */
 const PASSWORD = "Smoke-Test-Password-1!";
+/** Primary test user; owns the workspace. */
 const userA = { name: "Smoke A", email: `smoke-a-${RUN_ID}@test.local`, password: PASSWORD };
+/** Second user, used to check that data isn't visible across accounts. */
 const userB = { name: "Smoke B", email: `smoke-b-${RUN_ID}@test.local`, password: PASSWORD };
 
+/** Plain-text fixture about photosynthesis. */
 const TEXT_SOURCE = `Photosynthesis is the process plants use to turn light into chemical energy.
 It happens in the chloroplasts, which contain the green pigment chlorophyll.
 
@@ -257,6 +353,7 @@ The Calvin cycle takes place in the stroma and uses ATP and NADPH to fix carbon 
 
 Oxygen is released as a by-product when water molecules are split during the light reactions.`;
 
+/** Markdown fixture about cellular respiration. */
 const MARKDOWN_SOURCE = `# Cellular respiration
 
 Cellular respiration converts glucose into ATP.
@@ -270,11 +367,16 @@ Cellular respiration converts glucose into ATP.
 // Flow
 // ---------------------------------------------------------------------------
 
+/** Client for {@link userA}. */
 const a = new Client("A");
+/** Client for {@link userB}. */
 const b = new Client("B");
+/** Ids shared between steps (workspace, source, conversation, ...). */
 const state: Record<string, string> = {};
+/** Path under the test workspace, e.g. `ws("/sources")`. */
 const ws = (path = "") => `/api/workspaces/${state.workspaceId}${path}`;
 
+/** Runs every smoke-test section in order, prints a summary and sets the exit code. */
 async function main() {
     console.log(`Smoke test against ${BASE_URL} (ai: ${AI}, external: ${EXTERNAL}, keep: ${KEEP})`);
 

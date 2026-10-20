@@ -1,8 +1,12 @@
+/** Multer upload middleware for PDF sources. */
+
 import multer from "multer";
 import { APIError } from "../../shared/http/api-error.js";
 
+/** Maximum accepted PDF size (10 MB). */
 const MAX_PDF_SIZE_BYTES = 10 * 1024 * 1024;
 
+/** MIME types accepted for PDFs (`application/octet-stream` is also tolerated in the filter). */
 const PDF_MIME_TYPES = new Set(["application/pdf", "application/x-pdf"]);
 
 /**
@@ -35,4 +39,5 @@ const pdfUpload = multer({
     },
 });
 
+/** Express middleware that parses one PDF from the multipart field `file` into `req.file` (in memory). */
 export const uploadSinglePdf = pdfUpload.single("file");

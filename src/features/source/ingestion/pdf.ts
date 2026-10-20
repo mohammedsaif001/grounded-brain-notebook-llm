@@ -15,6 +15,13 @@ export type PdfExtractResult = {
     pageCount: number;
 };
 
+/**
+ * Downloads a PDF.
+ *
+ * @param url - Where to fetch the file from
+ * @returns The raw bytes
+ * @throws {Error} `Failed to download PDF (<status>)` for non-OK responses
+ */
 async function downloadPdf(url: string) {
     const response = await fetch(url);
 
@@ -25,10 +32,12 @@ async function downloadPdf(url: string) {
     return response.arrayBuffer();
 }
 
+/** Extracts text from PDFs held in memory or stored on Cloudinary. */
 export class PdfExtractor {
     /**
      * Extracts plain text from PDF bytes.
      *
+     * @param buffer - PDF bytes
      * @returns Joined full text, per-page strings, and total page count
      * @throws When no text could be extracted from the PDF
      */
@@ -65,6 +74,10 @@ export class PdfExtractor {
      * Tries the public `fileUrl` first; on 401, falls back to a signed download URL
      * when `publicId` and Cloudinary API credentials are available.
      *
+     * @param input.fileUrl - Public Cloudinary URL of the PDF
+     * @param input.publicId - Cloudinary public id, needed for the signed fallback
+     * @param input.resourceType - Cloudinary resource type (defaults to `raw`)
+     * @returns Joined full text, per-page strings, and total page count
      * @throws When download or extraction fails, or a signed URL cannot be generated
      */
     static async fromCloudinary(input: {

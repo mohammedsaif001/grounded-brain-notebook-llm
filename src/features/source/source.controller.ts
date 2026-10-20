@@ -15,7 +15,9 @@ import {
 } from "./source.validator.js";
 import { workspaceIdParamSchema } from "../workspace/workspace.validator.js";
 
+/** HTTP handlers for `/api/workspaces/:workspaceId/sources`. Each validates input, then delegates to the service. */
 export class SourceController {
+    /** GET `/` — lists sources without content; supports `q`, `type` and `status` filters (200). */
     static list = async (req: Request, res: Response) => {
         const { workspaceId } = workspaceIdParamSchema.parse(req.params);
         const filters = listSourcesQuerySchema.parse(req.query);
@@ -23,12 +25,14 @@ export class SourceController {
         APIResponse.Ok(res, sources);
     };
 
+    /** GET `/:sourceId` — returns one source including its content (200). */
     static get = async (req: Request, res: Response) => {
         const { workspaceId, sourceId } = sourceIdParamSchema.parse(req.params);
         const source = await SourceService.get(workspaceId, sourceId, req.session.user.id);
         APIResponse.Ok(res, source);
     };
 
+    /** POST `/` — creates a TEXT or MARKDOWN source and queues processing (201). */
     static create = async (req: Request, res: Response) => {
         const { workspaceId } = workspaceIdParamSchema.parse(req.params);
         const input = createSourceSchema.parse(req.body);
@@ -36,6 +40,7 @@ export class SourceController {
         APIResponse.Created(res, source);
     };
 
+    /** POST `/upload` — multipart PDF upload (field `file`, optional `title`) (201). */
     static uploadPdf = async (req: Request, res: Response) => {
         const { workspaceId } = workspaceIdParamSchema.parse(req.params);
 
@@ -54,6 +59,7 @@ export class SourceController {
         APIResponse.Created(res, source);
     };
 
+    /** POST `/import/website` — scrapes a URL with Firecrawl into a source (201). */
     static importWebsite = async (req: Request, res: Response) => {
         const { workspaceId } = workspaceIdParamSchema.parse(req.params);
         const input = importWebsiteSchema.parse(req.body);
@@ -61,6 +67,7 @@ export class SourceController {
         APIResponse.Created(res, source);
     };
 
+    /** POST `/import/youtube` — imports a YouTube transcript as a source (201). */
     static importYoutube = async (req: Request, res: Response) => {
         const { workspaceId } = workspaceIdParamSchema.parse(req.params);
         const input = importYoutubeSchema.parse(req.body);
@@ -68,6 +75,7 @@ export class SourceController {
         APIResponse.Created(res, source);
     };
 
+    /** POST `/import/web-search` — saves a chosen web search result as a source (201). */
     static importWebSearch = async (req: Request, res: Response) => {
         const { workspaceId } = workspaceIdParamSchema.parse(req.params);
         const input = importWebSearchSchema.parse(req.body);
@@ -75,12 +83,14 @@ export class SourceController {
         APIResponse.Created(res, source);
     };
 
+    /** DELETE `/:sourceId` — deletes a source and its vectors/chunks (204). */
     static delete = async (req: Request, res: Response) => {
         const { workspaceId, sourceId } = sourceIdParamSchema.parse(req.params);
         await SourceService.delete(workspaceId, sourceId, req.session.user.id);
         APIResponse.NoContent(res);
     };
 
+    /** POST `/bulk-delete` — deletes several sources by id (204). */
     static bulkDelete = async (req: Request, res: Response) => {
         const { workspaceId } = workspaceIdParamSchema.parse(req.params);
         const input = bulkDeleteSourcesSchema.parse(req.body);
@@ -88,18 +98,21 @@ export class SourceController {
         APIResponse.NoContent(res);
     };
 
+    /** GET `/:sourceId/chunks` — returns the indexed chunks and their count (200). */
     static getChunks = async (req: Request, res: Response) => {
         const { workspaceId, sourceId } = sourceIdParamSchema.parse(req.params);
         const result = await SourceService.getChunks(workspaceId, sourceId, req.session.user.id);
         APIResponse.Ok(res, result);
     };
 
+    /** POST `/:sourceId/reprocess` — re-indexes one source in the background (202). */
     static reprocess = async (req: Request, res: Response) => {
         const { workspaceId, sourceId } = sourceIdParamSchema.parse(req.params);
         await SourceService.reprocess(workspaceId, sourceId, req.session.user.id);
         APIResponse.Accepted(res, { reprocessed: true });
     };
 
+    /** POST `/reprocess` — re-queues FAILED sources, optionally limited to `sourceIds` (200). */
     static reprocessFailed = async (req: Request, res: Response) => {
         const { workspaceId } = workspaceIdParamSchema.parse(req.params);
         const input = reprocessSourcesSchema.parse(req.body ?? {});

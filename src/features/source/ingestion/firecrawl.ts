@@ -5,6 +5,7 @@
 import { FirecrawlClient } from "../../../config/firecrawl.js";
 import { APIError } from "../../../shared/http/api-error.js";
 
+/** Turns web pages into markdown using Firecrawl. */
 export class FirecrawlScraper {
     /**
      * Scrapes a public URL and returns clean markdown suitable for RAG indexing.

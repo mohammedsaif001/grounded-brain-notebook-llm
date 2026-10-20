@@ -11,7 +11,9 @@ import { getDocumentProxy } from "unpdf";
 import { APIError } from "../../../shared/http/api-error.js";
 
 /** The PDF spec allows the `%PDF-` header anywhere in the first 1024 bytes. */
+/** How far into the file to look for the `%PDF-` header. */
 const HEADER_SEARCH_BYTES = 1024;
+/** Magic bytes every PDF starts with. */
 const PDF_HEADER = Buffer.from("%PDF-");
 
 /** Guards against page-count bombs that are cheap to upload but expensive to process. */
@@ -25,13 +27,16 @@ const MAX_PDF_PAGES = 1000;
 const ACTIVE_CONTENT_PATTERN =
     /\/(JavaScript|JS|Launch|EmbeddedFile|EmbeddedFiles|RichMedia|XFA|ImportData|SubmitForm)\b/;
 
+/** Error shown whenever active content is detected. */
 const ACTIVE_CONTENT_MESSAGE =
     "This PDF contains active content (scripts, embedded files, or launch actions) and was rejected for security reasons.";
 
+/** Security checks for uploaded PDFs. */
 export class PdfValidator {
     /**
      * Verifies that `buffer` is a well-formed PDF without active content.
      *
+     * @param buffer - Uploaded file bytes
      * @throws {APIError} BadRequest when the file is not a PDF, is password-protected,
      *   has too many pages, or contains scripts, attachments, or launch actions
      */
@@ -88,6 +93,9 @@ export class PdfValidator {
      * Makes a client-supplied filename safe to store and display: strips any path,
      * illegal/control characters and OS-reserved names, caps the length, and keeps a
      * `.pdf` suffix.
+     *
+     * @param originalName - File name supplied by the client
+     * @returns A safe name such as `report.pdf` (falls back to `document.pdf`)
      */
     static sanitizeFilename(originalName: string) {
         const baseName = originalName.split(/[\\/]/).pop() ?? "";
