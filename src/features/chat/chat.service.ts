@@ -224,30 +224,39 @@ export class ChatService {
                     return;
                 }
 
-                await ConversationService.addMessage({
-                    conversationId: conversation.id,
-                    role: "ASSISTANT",
-                    content: assistantText,
-                    citations: this.buildCitations(assistantText, retrievedChunks, webResults),
-                });
-
-                await ConversationService.touch(conversation.id);
-                await ConversationService.ensureTitle(conversation, userText);
-
-                // Compare against what the last summary covered rather than using a modulo,
-                // so an aborted turn (user message saved, no reply) can't shift the count
-                // off the interval and stop summaries forever.
-                const messageCount = await ConversationService.countMessages(conversation.id);
-
-                if (
-                    messageCount - conversation.summaryMessageCount >=
-                    CONVERSATION_SUMMARY_INTERVAL
-                ) {
-                    await EventPublisher.conversationSummaryRequested({
+                // Runs after the reply has streamed, so errors can't reach the Express error
+                // handler; log them instead of letting them become an unhandled rejection.
+                try {
+                    await ConversationService.addMessage({
                         conversationId: conversation.id,
-                        userId,
-                        messageCount,
+                        role: "ASSISTANT",
+                        content: assistantText,
+                        citations: this.buildCitations(assistantText, retrievedChunks, webResults),
                     });
+
+                    await ConversationService.touch(conversation.id);
+                    await ConversationService.ensureTitle(conversation, userText);
+
+                    // Compare against what the last summary covered rather than using a modulo,
+                    // so an aborted turn (user message saved, no reply) can't shift the count
+                    // off the interval and stop summaries forever.
+                    const messageCount = await ConversationService.countMessages(conversation.id);
+
+                    if (
+                        messageCount - conversation.summaryMessageCount >=
+                        CONVERSATION_SUMMARY_INTERVAL
+                    ) {
+                        await EventPublisher.conversationSummaryRequested({
+                            conversationId: conversation.id,
+                            userId,
+                            messageCount,
+                        });
+                    }
+                } catch (error) {
+                    console.error(
+                        `Failed to persist assistant reply for conversation ${conversation.id}:`,
+                        error,
+                    );
                 }
             },
         });
