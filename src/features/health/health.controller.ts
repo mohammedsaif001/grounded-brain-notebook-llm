@@ -3,6 +3,7 @@ import { HealthService } from "./health.service.js";
 import { APIError } from "../../shared/http/api-error.js";
 import { APIResponse } from "../../shared/http/api-response.js";
 
+/** HTTP handlers for the public `/health` endpoints. */
 export class HealthController {
     /** Liveness: the process is up and serving. Never touches dependencies. */
     static live = (_req: Request, res: Response) => {

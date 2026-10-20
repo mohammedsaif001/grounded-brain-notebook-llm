@@ -17,7 +17,13 @@ const DEFAULT_ARTIFACT_TITLES: Record<ArtifactRecord["type"], string> = {
 
 /** Learning artifact business logic: CRUD plus the background generation entry point. */
 export class ArtifactService {
-    /** Lists artifacts in a workspace, newest first. */
+    /**
+     * Lists artifacts in a workspace, newest first.
+     *
+     * @param workspaceId - Workspace to list from
+     * @param userId - Requesting user; must own the workspace
+     * @returns Artifacts with their generation status
+     */
     static async list(workspaceId: string, userId: string) {
         await WorkspaceService.getForUser(workspaceId, userId);
         return ArtifactRepository.findAllByWorkspaceId(workspaceId);
@@ -26,6 +32,10 @@ export class ArtifactService {
     /**
      * Loads a single artifact after verifying workspace ownership.
      *
+     * @param workspaceId - Workspace the artifact belongs to
+     * @param artifactId - Artifact to load
+     * @param userId - Requesting user; must own the workspace
+     * @returns The artifact record
      * @throws {APIError} NotFound when the artifact does not exist in this workspace
      */
     static async get(workspaceId: string, artifactId: string, userId: string) {
@@ -46,6 +56,9 @@ export class ArtifactService {
      * Validates that ready sources exist before creating the row; the AI work runs
      * asynchronously in {@link ArtifactService.generate}.
      *
+     * @param workspaceId - Workspace to create the artifact in
+     * @param userId - Requesting user; must own the workspace
+     * @param input - Artifact type plus optional title and source subset
      * @returns New artifact with status `PENDING`
      * @throws {APIError} BadRequest when no ready sources are available
      */
@@ -77,6 +90,11 @@ export class ArtifactService {
     }
 
     /**
+     * Deletes an artifact after verifying workspace ownership.
+     *
+     * @param workspaceId - Workspace the artifact belongs to
+     * @param artifactId - Artifact to delete
+     * @param userId - Requesting user; must own the workspace
      * @throws {APIError} NotFound when the artifact is not found
      */
     static async delete(workspaceId: string, artifactId: string, userId: string) {
@@ -91,6 +109,8 @@ export class ArtifactService {
      * status: PROCESSING → gatherSourceContext → generateContent → status: READY (or FAILED)
      * ```
      *
+     * @param artifactId - Artifact row created by {@link ArtifactService.create}
+     * @returns The updated artifact with status `READY` and its generated content
      * @throws When the artifact is missing or generation fails (status set to `FAILED`)
      */
     static async generate(artifactId: string) {

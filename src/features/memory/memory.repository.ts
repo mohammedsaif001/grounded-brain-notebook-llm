@@ -19,7 +19,15 @@ export type MemoryRecord = {
     source: "manual" | "learned";
 };
 
-/** Maps a raw Mem0 record into the app's {@link MemoryRecord} shape. */
+/**
+ * Maps a raw Mem0 record into the app's {@link MemoryRecord} shape.
+ *
+ * Fills in missing timestamps, serialises dates to ISO strings and derives `source`
+ * (`manual` when `metadata.source` says so, otherwise `learned`).
+ *
+ * @param record - Raw record from the Mem0 SDK
+ * @returns The normalised memory
+ */
 function toMemoryRecord(record: {
     id: string;
     memory?: string;
@@ -43,6 +51,7 @@ function toMemoryRecord(record: {
     };
 }
 
+/** A raw Mem0 memory object, before normalisation. */
 type RawMemory = Parameters<typeof toMemoryRecord>[0];
 
 /**
@@ -51,6 +60,9 @@ type RawMemory = Parameters<typeof toMemoryRecord>[0];
  * mem0ai's typings say `add`/`update` return `Memory[]`, but the platform API actually
  * returns `{ results: [{ id, data: { memory } }] }` from `add` and a single memory object
  * from `update`. All three shapes are accepted so an SDK fix doesn't break us either way.
+ *
+ * @param response - Whatever the Mem0 SDK returned from `add` or `update`
+ * @returns The first memory, or `null` when the response contains none
  */
 function firstMemory(response: unknown): RawMemory | null {
     if (Array.isArray(response)) {
@@ -77,7 +89,12 @@ function firstMemory(response: unknown): RawMemory | null {
  * write methods throw `ServiceUnavailable` via {@link Mem0Client.get}.
  */
 export class MemoryRepository {
-    /** Lists up to 100 memories for a user. */
+    /**
+     * Lists up to 100 memories for a user.
+     *
+     * @param userId - Owner's user id
+     * @returns Memories, or an empty array when Mem0 isn't configured
+     */
     static async findAllByUserId(userId: string) {
         if (!Mem0Client.isConfigured()) {
             return [];
@@ -92,7 +109,11 @@ export class MemoryRepository {
         return page.results.map(toMemoryRecord);
     }
 
-    /** Fetches one memory plus its owning `userId`, or `null` when it doesn't exist. */
+    /**
+     * Fetches one memory plus its owning `userId`, or `null` when it doesn't exist.
+     *
+     * @param memoryId - Mem0 memory id (malformed ids are treated as not found)
+     */
     static async findById(memoryId: string) {
         try {
             const record = await Mem0Client.get().get(memoryId);
@@ -107,7 +128,13 @@ export class MemoryRepository {
         }
     }
 
-    /** Semantic search over a user's memories, above {@link MEMORY_SEARCH_MIN_SCORE}. */
+    /**
+     * Semantic search over a user's memories, above {@link MEMORY_SEARCH_MIN_SCORE}.
+     *
+     * @param userId - Owner's user id
+     * @param query - Text to match against; blank returns nothing
+     * @returns Up to {@link MEMORY_SEARCH_TOP_K} memories, or `[]` when Mem0 is off
+     */
     static async search(userId: string, query: string) {
         if (!Mem0Client.isConfigured() || !query.trim()) {
             return [];
@@ -125,6 +152,10 @@ export class MemoryRepository {
     /**
      * Stores one memory verbatim (no inference).
      *
+     * @param userId - Owner's user id
+     * @param input.memory - Memory text
+     * @param input.metadata - Optional metadata, e.g. `{ source: "manual" }`
+     * @returns The created memory
      * @throws When Mem0 returns no created record
      */
     static async create(
@@ -146,7 +177,13 @@ export class MemoryRepository {
         return toMemoryRecord({ ...first, metadata: first.metadata ?? input.metadata ?? null });
     }
 
-    /** Lets Mem0 infer and store memories from conversation turns. No-op when Mem0 is off. */
+    /**
+     * Lets Mem0 infer and store memories from conversation turns. No-op when Mem0 is off.
+     *
+     * @param userId - Owner's user id
+     * @param messages - Conversation turns to learn from
+     * @param metadata - Optional metadata attached to the created memories
+     */
     static async createFromMessages(
         userId: string,
         messages: MemoryMessage[],
@@ -166,6 +203,9 @@ export class MemoryRepository {
     /**
      * Replaces a memory's text.
      *
+     * @param memoryId - Memory to update
+     * @param input.memory - New text
+     * @returns The updated memory
      * @throws When Mem0 returns no updated record
      */
     static async update(memoryId: string, input: { memory: string }) {
@@ -181,6 +221,11 @@ export class MemoryRepository {
         return toMemoryRecord(first);
     }
 
+    /**
+     * Deletes a memory.
+     *
+     * @param memoryId - Memory to delete
+     */
     static async delete(memoryId: string) {
         await Mem0Client.get().delete(memoryId);
     }

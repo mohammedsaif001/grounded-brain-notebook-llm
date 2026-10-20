@@ -1,6 +1,7 @@
 import type { Prisma } from "../../generated/prisma/client.js";
 import prisma from "../../config/db.js";
 
+/** Columns returned for every artifact query. */
 export const artifactSelect = {
     id: true,
     workspaceId: true,
@@ -14,10 +15,12 @@ export const artifactSelect = {
     updatedAt: true,
 } as const;
 
+/** An artifact row as returned by this repository. */
 export type ArtifactRecord = Prisma.LearningArtifactGetPayload<{
     select: typeof artifactSelect;
 }>;
 
+/** Fields needed to insert an artifact; `status` defaults to `PENDING`. */
 export type CreateArtifactData = {
     workspaceId: string;
     type: ArtifactRecord["type"];
@@ -27,6 +30,7 @@ export type CreateArtifactData = {
     metadata?: Prisma.InputJsonValue;
 };
 
+/** Fields that can change after creation (generation progress and results). */
 export type UpdateArtifactData = {
     title?: string;
     content?: Prisma.InputJsonValue;
@@ -36,6 +40,11 @@ export type UpdateArtifactData = {
 
 /** Data access for learning artifacts (Postgres). */
 export class ArtifactRepository {
+    /**
+     * Finds all artifacts in a workspace, newest first.
+     *
+     * @param workspaceId - Owning workspace
+     */
     static findAllByWorkspaceId(workspaceId: string) {
         return prisma.learningArtifact.findMany({
             where: { workspaceId },
@@ -44,6 +53,12 @@ export class ArtifactRepository {
         });
     }
 
+    /**
+     * Finds an artifact by id regardless of workspace (used by the background worker).
+     *
+     * @param artifactId - Artifact id
+     * @returns The artifact, or `null` when it doesn't exist
+     */
     static findById(artifactId: string) {
         return prisma.learningArtifact.findUnique({
             where: { id: artifactId },
@@ -51,6 +66,13 @@ export class ArtifactRepository {
         });
     }
 
+    /**
+     * Finds an artifact only if it belongs to the given workspace.
+     *
+     * @param artifactId - Artifact id
+     * @param workspaceId - Workspace the artifact must belong to
+     * @returns The artifact, or `null` when not found in that workspace
+     */
     static findByIdAndWorkspaceId(artifactId: string, workspaceId: string) {
         return prisma.learningArtifact.findFirst({
             where: { id: artifactId, workspaceId },
@@ -58,6 +80,12 @@ export class ArtifactRepository {
         });
     }
 
+    /**
+     * Inserts a new artifact.
+     *
+     * @param data - Artifact fields
+     * @returns The created artifact
+     */
     static create(data: CreateArtifactData) {
         return prisma.learningArtifact.create({
             data: {
@@ -72,6 +100,13 @@ export class ArtifactRepository {
         });
     }
 
+    /**
+     * Updates an artifact's title, content, status or metadata.
+     *
+     * @param artifactId - Artifact to update
+     * @param data - Fields to change
+     * @returns The updated artifact
+     */
     static update(artifactId: string, data: UpdateArtifactData) {
         return prisma.learningArtifact.update({
             where: { id: artifactId },
@@ -80,6 +115,11 @@ export class ArtifactRepository {
         });
     }
 
+    /**
+     * Deletes an artifact.
+     *
+     * @param artifactId - Artifact to delete
+     */
     static async delete(artifactId: string) {
         await prisma.learningArtifact.delete({
             where: { id: artifactId },

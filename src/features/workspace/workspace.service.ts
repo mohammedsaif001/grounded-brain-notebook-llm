@@ -7,11 +7,22 @@ import type { CreateWorkspaceInput, UpdateWorkspaceInput } from "./workspace.val
 
 /** Workspace business logic. Also the ownership gate used by every workspace-scoped service. */
 export class WorkspaceService {
-    /** Lists the user's workspaces, most recently updated first. */
+    /**
+     * Lists the user's workspaces, most recently updated first.
+     *
+     * @param userId - Owner's user id
+     */
     static listForUser(userId: string): Promise<WorkspaceRecord[]> {
         return WorkspaceRepository.findAllByUserId(userId);
     }
 
+    /**
+     * Creates a workspace owned by the user.
+     *
+     * @param userId - Owner's user id
+     * @param input - Validated title/description/icon/default model
+     * @returns The created workspace
+     */
     static create(userId: string, input: CreateWorkspaceInput) {
         return WorkspaceRepository.create(userId, input);
     }
@@ -19,6 +30,11 @@ export class WorkspaceService {
     /**
      * Loads a workspace only if it belongs to the given user.
      *
+     * Other services call this first to enforce ownership of workspace-scoped data.
+     *
+     * @param workspaceId - Workspace to load
+     * @param userId - Requesting user
+     * @returns The workspace record
      * @throws {APIError} NotFound when the workspace does not exist or belongs to another user
      */
     static async getForUser(workspaceId: string, userId: string): Promise<WorkspaceRecord> {
@@ -34,6 +50,10 @@ export class WorkspaceService {
     /**
      * Updates workspace settings after verifying ownership.
      *
+     * @param workspaceId - Workspace to update
+     * @param userId - Requesting user
+     * @param input - Fields to change (at least one)
+     * @returns The updated workspace
      * @throws {APIError} NotFound when the workspace is not found for this user
      */
     static async update(workspaceId: string, userId: string, input: UpdateWorkspaceInput) {
@@ -46,6 +66,8 @@ export class WorkspaceService {
      *
      * Vector cleanup is best-effort: deletion continues even if it fails.
      *
+     * @param workspaceId - Workspace to delete
+     * @param userId - Requesting user
      * @throws {APIError} NotFound when the workspace is not found for this user
      */
     static async delete(workspaceId: string, userId: string) {

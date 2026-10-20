@@ -8,6 +8,8 @@ export class MemoryService {
      *
      * Memories owned by other users are reported as not found so their ids can't be probed.
      *
+     * @param userId - Expected owner
+     * @param memoryId - Memory to check
      * @throws {APIError} NotFound when the memory does not exist or belongs to another user
      */
     private static async assertOwnedByUser(userId: string, memoryId: string) {
@@ -18,16 +20,31 @@ export class MemoryService {
         }
     }
 
+    /**
+     * Lists a user's memories.
+     *
+     * @param userId - Owner's user id
+     */
     static listForUser(userId: string) {
         return MemoryRepository.findAllByUserId(userId);
     }
 
-    /** Memories relevant to `query`, for injecting into the chat prompt. */
+    /**
+     * Memories relevant to `query`, for injecting into the chat prompt.
+     *
+     * @param userId - Owner's user id
+     * @param query - The user's message or rewritten query
+     */
     static search(userId: string, query: string) {
         return MemoryRepository.search(userId, query);
     }
 
-    /** Stores a user-authored memory verbatim (not inferred). */
+    /**
+     * Stores a user-authored memory verbatim (not inferred), tagged `source: "manual"`.
+     *
+     * @param userId - Owner's user id
+     * @param input.memory - Memory text
+     */
     static create(userId: string, input: { memory: string }) {
         return MemoryRepository.create(userId, {
             memory: input.memory,
@@ -35,7 +52,13 @@ export class MemoryService {
         });
     }
 
-    /** Lets Mem0 infer new memories from conversation turns. */
+    /**
+     * Lets Mem0 infer new memories from conversation turns.
+     *
+     * @param userId - Owner's user id
+     * @param messages - Turns to learn from
+     * @param metadata - Optional metadata attached to created memories
+     */
     static learnFromMessages(
         userId: string,
         messages: MemoryMessage[],
@@ -45,6 +68,11 @@ export class MemoryService {
     }
 
     /**
+     * Replaces a memory's text after verifying ownership.
+     *
+     * @param userId - Requesting user
+     * @param memoryId - Memory to update
+     * @param input.memory - New text
      * @throws {APIError} NotFound when the memory is missing or owned by another user
      */
     static async update(userId: string, memoryId: string, input: { memory: string }) {
@@ -53,6 +81,10 @@ export class MemoryService {
     }
 
     /**
+     * Deletes a memory after verifying ownership.
+     *
+     * @param userId - Requesting user
+     * @param memoryId - Memory to delete
      * @throws {APIError} NotFound when the memory is missing or owned by another user
      */
     static async delete(userId: string, memoryId: string) {

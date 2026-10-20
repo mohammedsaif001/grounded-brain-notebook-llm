@@ -11,8 +11,10 @@ const CHECK_TIMEOUT_MS = 5_000;
 /** Readiness results are reused for this long, so polling can't hammer external APIs. */
 const CACHE_TTL_MS = 10_000;
 
+/** Outcome of one probe; `configured` means keys are present but no free probe exists. */
 type CheckStatus = "up" | "down" | "configured" | "not_configured";
 
+/** Result of checking a single dependency. */
 type CheckResult = {
     status: CheckStatus;
     /** Required dependencies take the whole service down; optional ones only degrade it. */
@@ -22,11 +24,13 @@ type CheckResult = {
     error?: string;
 };
 
+/** Aggregate readiness: `down` if a required check failed, `degraded` if only optional ones did. */
 export type ReadinessReport = {
     status: "ok" | "degraded" | "down";
     checks: Record<string, CheckResult>;
 };
 
+/** How to probe one dependency. */
 type CheckDefinition = {
     required: boolean;
     /** `false` = integration not configured; skipped without probing. */
@@ -34,6 +38,7 @@ type CheckDefinition = {
     probe: () => Promise<PingResult>;
 };
 
+/** Every dependency checked by `/health/ready`, keyed by the name shown in the report. */
 const CHECKS: Record<string, CheckDefinition> = {
     database: { required: true, enabled: true, probe: () => HealthRepository.database() },
     pinecone: { required: true, enabled: true, probe: () => HealthRepository.pinecone() },
@@ -66,6 +71,12 @@ const CHECKS: Record<string, CheckDefinition> = {
     },
 };
 
+/**
+ * Rejects if `promise` takes longer than {@link CHECK_TIMEOUT_MS}.
+ *
+ * @param promise - The probe to bound
+ * @returns The probe's result
+ */
 function withTimeout<T>(promise: Promise<T>) {
     return Promise.race([
         promise,
@@ -78,6 +89,12 @@ function withTimeout<T>(promise: Promise<T>) {
     ]);
 }
 
+/**
+ * Runs one probe and converts the outcome (or failure) into a {@link CheckResult}.
+ * Latency and error text are only included outside production.
+ *
+ * @param definition - The dependency to probe
+ */
 async function runCheck({ required, enabled, probe }: CheckDefinition): Promise<CheckResult> {
     if (!enabled) {
         return { status: "not_configured", required };
@@ -105,7 +122,9 @@ async function runCheck({ required, enabled, probe }: CheckDefinition): Promise<
     }
 }
 
+/** Aggregates dependency probes into a readiness report. */
 export class HealthService {
+    /** Last report and when it stops being reused. */
     private static cached: { report: ReadinessReport; expiresAt: number } | null = null;
 
     /**
@@ -113,6 +132,9 @@ export class HealthService {
      *
      * `down` when a required dependency (database, Pinecone, OpenAI, Inngest) fails,
      * `degraded` when only an optional integration fails, otherwise `ok`.
+     * Results are cached for {@link CACHE_TTL_MS}.
+     *
+     * @returns The readiness report
      */
     static async readiness(): Promise<ReadinessReport> {
         if (this.cached && this.cached.expiresAt > Date.now()) {

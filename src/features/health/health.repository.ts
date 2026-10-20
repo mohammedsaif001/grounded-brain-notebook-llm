@@ -9,11 +9,19 @@ import { PineconeClient } from "../../config/pinecone.js";
 /** Local Inngest dev server started by `npm run dev`. */
 const INNGEST_DEV_SERVER_URL = "http://localhost:8288";
 
+/** Langfuse EU cloud, used when `LANGFUSE_BASE_URL` is unset. */
 const DEFAULT_LANGFUSE_BASE_URL = "https://cloud.langfuse.com";
 
 /** Result of probing one dependency: `true` = reachable, `"configured"` = no free probe exists. */
 export type PingResult = true | "configured";
 
+/**
+ * Fetches a URL and fails unless the response is 2xx.
+ *
+ * @param url - URL to request
+ * @param init - Optional fetch options
+ * @throws {Error} `HTTP <status>` for non-OK responses
+ */
 async function expectOk(url: string, init?: RequestInit) {
     const response = await fetch(url, init);
     if (!response.ok) {
@@ -25,11 +33,13 @@ async function expectOk(url: string, init?: RequestInit) {
  * Cheap, free probes for each external dependency. None of them consume tokens or credits.
  */
 export class HealthRepository {
+    /** Runs `SELECT 1` against Postgres. */
     static async database(): Promise<PingResult> {
         await prisma.$queryRaw`SELECT 1`;
         return true;
     }
 
+    /** Reads index stats, which also creates the index if it is missing. */
     static async pinecone(): Promise<PingResult> {
         await (await PineconeClient.getIndex()).describeIndexStats();
         return true;
@@ -58,6 +68,7 @@ export class HealthRepository {
         return "configured";
     }
 
+    /** Calls the Mem0 ping endpoint (throws `ServiceUnavailable` if unconfigured). */
     static async mem0(): Promise<PingResult> {
         await Mem0Client.get().ping();
         return true;
@@ -72,6 +83,7 @@ export class HealthRepository {
         return true;
     }
 
+    /** Hits Langfuse's public health endpoint. */
     static async langfuse(): Promise<PingResult> {
         await expectOk(`${env.LANGFUSE_BASE_URL ?? DEFAULT_LANGFUSE_BASE_URL}/api/public/health`);
         return true;

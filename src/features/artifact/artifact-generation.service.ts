@@ -22,6 +22,7 @@ const CONTEXT_OVERHEAD_CHARS = 2_000;
 /** Max parallel model calls when condensing one oversized source. */
 const CONDENSE_CONCURRENCY = 4;
 
+/** Model output for FLASHCARDS: 3-30 front/back cards. */
 const flashcardsSchema = z.object({
     cards: z
         .array(
@@ -34,6 +35,7 @@ const flashcardsSchema = z.object({
         .max(30),
 });
 
+/** Model output for QUIZ: 3-15 multiple-choice questions; `correctIndex` is 0-based into `options`. */
 const quizSchema = z.object({
     questions: z
         .array(
@@ -48,6 +50,7 @@ const quizSchema = z.object({
         .max(15),
 });
 
+/** Model output for MINDMAP: 2-40 labelled nodes plus edges referencing node ids. */
 const mindmapSchema = z.object({
     nodes: z
         .array(
@@ -67,10 +70,12 @@ const mindmapSchema = z.object({
     ),
 });
 
+/** Model output for TAKEAWAYS: 3-20 short bullet strings. */
 const takeawaysSchema = z.object({
     items: z.array(z.string()).min(3).max(20),
 });
 
+/** Model output for REPORT: the full markdown plus the same content split into titled sections. */
 const reportSchema = z.object({
     markdown: z.string(),
     sections: z.array(
@@ -154,6 +159,8 @@ async function condenseSource(title: string, content: string, budget: number) {
 /**
  * Drops quiz questions whose `correctIndex` doesn't point at one of their options.
  *
+ * @param quiz - Raw quiz returned by the model
+ * @returns The quiz containing only valid questions
  * @throws {Error} When fewer than 3 valid questions remain (lets Inngest retry)
  */
 function sanitizeQuiz(quiz: z.infer<typeof quizSchema>) {
@@ -171,6 +178,9 @@ function sanitizeQuiz(quiz: z.infer<typeof quizSchema>) {
 /**
  * Removes duplicate nodes and edges that reference unknown nodes, self-loops,
  * or duplicate ids, so the client can render the graph without crashing.
+ *
+ * @param mindmap - Raw mind map returned by the model
+ * @returns A cleaned graph where every edge connects two existing nodes
  */
 function sanitizeMindmap(mindmap: z.infer<typeof mindmapSchema>) {
     const nodeIds = new Set<string>();
@@ -210,7 +220,6 @@ export class ArtifactGenerationService {
      * @param sourceIds - Optional subset of source ids; defaults to all READY sources
      * @returns Ids of the READY sources that will be used
      * @throws {APIError} BadRequest when no ready sources match
-     *
      */
     static async resolveReadySourceIds(workspaceId: string, sourceIds?: string[]) {
         const sources = await SourceService.listReady(workspaceId);
@@ -240,9 +249,6 @@ export class ArtifactGenerationService {
      * @param sourceIds - Optional subset of source ids; defaults to all READY sources
      * @returns Combined source text and the ids actually used
      * @throws {APIError} BadRequest when no ready sources exist or none have extracted content
-     *
-     *
-     *
      */
     static async gatherSourceContext(workspaceId: string, sourceIds?: string[]) {
         const sources = await SourceService.listReadyWithContent(workspaceId);
@@ -298,9 +304,6 @@ export class ArtifactGenerationService {
      * @param sourceText - Combined source material from {@link ArtifactGenerationService.gatherSourceContext}
      * @returns Type-specific JSON content stored on the artifact row
      * @throws {APIError} BadRequest when the artifact type is unsupported
-     *
-     *
-     *
      */
     static async generateContent(type: ArtifactRecord["type"], sourceText: string) {
         const system = artifactSystem(type);
