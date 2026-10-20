@@ -1,0 +1,23 @@
+// Grounded Brain: data that lives outside Postgres
+// Eraser "Cloud Architecture" diagram-as-code
+title Postgres, Pinecone and Mem0
+direction right
+colorMode bold
+
+Postgres [icon: postgres, color: blue] {
+  source [icon: file-text]
+  source_chunk [icon: scissors, label: "source_chunk (id = X)"]
+}
+
+Pinecone index [icon: database, color: blue] {
+  namespace [icon: folder, label: "namespace = workspaceId"]
+  vector [icon: hash, label: "vector (id = X) + metadata"]
+}
+
+Mem0 [icon: brain, color: purple] {
+  memories [icon: user, label: "memories for user_id"]
+}
+
+source > source_chunk
+namespace > vector
+source_chunk <--> vector: same id

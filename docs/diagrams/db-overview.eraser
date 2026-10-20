@@ -1,0 +1,22 @@
+// Grounded Brain: ownership chain of the tables
+// Eraser "Flow Chart" diagram-as-code
+title Table ownership (user → workspace → everything else)
+direction right
+colorMode bold
+
+user [icon: user, color: gray]
+session [icon: key, color: gray]
+account [icon: link, color: gray]
+workspace [icon: folder, color: green]
+source [icon: file-text, color: blue]
+source_chunk [icon: scissors, color: blue]
+conversation [icon: message-square, color: purple]
+message [icon: message-circle, color: purple]
+learning_artifact [icon: book-open, color: orange]
+
+user > workspace
+user > session
+user > account
+workspace > source > source_chunk
+workspace > conversation > message
+workspace > learning_artifact

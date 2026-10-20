@@ -1,0 +1,17 @@
+// Grounded Brain: layered design (routes → controllers → services → repositories)
+// Eraser "Flow Chart" diagram-as-code
+title Layered design
+direction right
+colorMode bold
+
+Routes [icon: git-branch, color: gray, label: "routes\nURL + middleware"]
+Controller [icon: check-square, color: green, label: "controller\nvalidate (Zod) + respond"]
+Service [icon: settings, color: green, label: "service\nrules + orchestration"]
+Repository [icon: layers, color: blue, label: "repository\nqueries"]
+Data stores [shape: cylinder, icon: database, color: blue, label: "Postgres / Pinecone / Mem0"]
+External APIs [icon: globe, color: orange, label: "OpenAI · Firecrawl · Tavily · Cloudinary"]
+EventPublisher [icon: zap, color: purple, label: "EventPublisher → Inngest"]
+
+Routes > Controller > Service > Repository > Data stores
+Service > External APIs
+Service > EventPublisher

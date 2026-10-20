@@ -1,0 +1,20 @@
+// Grounded Brain: source status lifecycle
+// Eraser "Flow Chart" diagram-as-code
+title Source status lifecycle
+direction right
+colorMode bold
+
+Start [shape: oval, color: gray, label: "start"]
+PENDING [color: gray]
+PROCESSING [color: blue]
+READY [color: green]
+FAILED [color: red]
+Deleted [shape: oval, color: gray, label: "deleted"]
+
+Start > PENDING: created / reprocess requested
+PENDING > PROCESSING: Inngest job starts
+PROCESSING > READY: chunks embedded and indexed
+PROCESSING > FAILED: step failed after retries
+FAILED > PENDING: reprocess
+READY > PENDING: reprocess
+READY > Deleted: deleted

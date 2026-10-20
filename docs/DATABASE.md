@@ -49,6 +49,13 @@ flowchart LR
     U --> AC[account]
 ```
 
+<details>
+<summary>Diagram not rendering (e.g. in the GitHub mobile app)? View it as an image</summary>
+
+![Table ownership](images/db-overview.png)
+
+</details>
+
 ---
 
 ## 2. ER diagram
@@ -170,6 +177,13 @@ erDiagram
         DateTime updatedAt
     }
 ```
+
+<details>
+<summary>Diagram not rendering (e.g. in the GitHub mobile app)? View it as an image</summary>
+
+![ER diagram](images/database-er.png)
+
+</details>
 
 > An icon-styled version of this diagram is in [`docs/diagrams/database-er.eraser`](diagrams/database-er.eraser).
 > Paste it into [eraser.io](https://app.eraser.io) to render it.
@@ -305,6 +319,13 @@ flowchart TD
     W --> A["learning_artifact rows"]
 ```
 
+<details>
+<summary>Diagram not rendering (e.g. in the GitHub mobile app)? View it as an image</summary>
+
+![Workspace delete cascade](images/db-cascade.png)
+
+</details>
+
 **Cascades do not reach external systems.** The services clean those up explicitly:
 
 | Action             | What the service does besides the Postgres delete                                                                                           |
@@ -372,6 +393,13 @@ stateDiagram-v2
     READY --> [*]: deleted
 ```
 
+<details>
+<summary>Diagram not rendering (e.g. in the GitHub mobile app)? View it as an image</summary>
+
+![Source lifecycle](images/source-lifecycle.png)
+
+</details>
+
 Only `READY` sources are used by chat retrieval and artifact generation.
 
 ### Artifact lifecycle
@@ -383,6 +411,13 @@ stateDiagram-v2
     PROCESSING --> READY: content generated
     PROCESSING --> FAILED: generation error
 ```
+
+<details>
+<summary>Diagram not rendering (e.g. in the GitHub mobile app)? View it as an image</summary>
+
+![Artifact lifecycle](images/artifact-lifecycle.png)
+
+</details>
 
 ---
 
@@ -489,6 +524,13 @@ flowchart LR
     end
     C -. same id .- V
 ```
+
+<details>
+<summary>Diagram not rendering (e.g. in the GitHub mobile app)? View it as an image</summary>
+
+![Data outside Postgres](images/external-stores.png)
+
+</details>
 
 ---
 

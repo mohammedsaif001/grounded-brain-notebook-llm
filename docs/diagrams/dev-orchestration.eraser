@@ -1,0 +1,18 @@
+// Grounded Brain: what `npm run dev` starts
+// Eraser "Flow Chart" diagram-as-code
+title npm run dev
+direction right
+colorMode bold
+
+docker up [icon: docker, color: blue, label: "docker:up\nPostgres :5434"]
+migrate [icon: postgres, color: blue, label: "db:migrate:deploy"]
+generate [icon: code, color: gray, label: "db:generate\n(Prisma client)"]
+concurrently [shape: diamond, icon: layers, label: "concurrently"]
+api [icon: nodejs, color: green, label: "api: tsx watch src/server.ts\n:8080"]
+inngest [icon: zap, color: purple, label: "inngest: inngest-cli dev\n:8288 → /api/inngest"]
+studio [icon: database, color: gray, label: "studio: prisma studio\n:5555"]
+
+docker up > migrate > generate > concurrently
+concurrently > api
+concurrently > inngest
+concurrently > studio

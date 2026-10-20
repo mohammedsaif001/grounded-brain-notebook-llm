@@ -1,0 +1,35 @@
+// Grounded Brain: life of an HTTP request (middleware order in src/app.ts)
+// Eraser "Flow Chart" diagram-as-code
+title Life of an HTTP request
+direction down
+colorMode bold
+
+Incoming request [shape: oval, icon: monitor, color: gray]
+requestLogger [icon: file-text, label: "requestLogger (pino-http)\nX-Request-Id, logs on finish"]
+corsMiddleware [icon: shield, label: "corsMiddleware\nonly CLIENT_URL, with credentials"]
+apiRateLimiter [icon: clock, label: "apiRateLimiter on /api\n300 req / 15 min per IP"]
+Auth route [shape: diamond, label: "/api/auth/* ?"]
+Better Auth [icon: lock, color: green, label: "Better Auth handler\n(reads raw body itself)"]
+bodyParsers [icon: code, label: "bodyParsers\nJSON + urlencoded, 2 MB"]
+Route [shape: diamond, label: "route"]
+Inngest handler [icon: zap, color: purple, label: "/api/inngest\nInngest serve handler (signed)"]
+Health [icon: heart, label: "/health router (public)"]
+requireAuth [icon: lock, color: green, label: "requireAuth\nsession → req.session"]
+Feature limiter [icon: clock, label: "aiRateLimiter / ingestionRateLimiter"]
+Controller [icon: settings, label: "asyncHandler(controller)"]
+Service [icon: layers, label: "service → repository"]
+Response [shape: oval, icon: check-circle, color: green, label: "APIResponse.Ok / Created / NoContent"]
+notFoundHandler [icon: x-circle, color: red, label: "notFoundHandler → 404"]
+errorHandler [icon: alert-triangle, color: red, label: "errorHandler\n→ standard error envelope"]
+
+Incoming request > requestLogger > corsMiddleware > apiRateLimiter > Auth route
+Auth route > Better Auth: yes
+Auth route > bodyParsers: no
+bodyParsers > Route
+Route > Inngest handler: /api/inngest
+Route > Health: /health
+Route > requireAuth: /api/workspaces/**, /api/memory
+Route > notFoundHandler: no match
+requireAuth > Feature limiter > Controller > Service > Response
+Controller --> errorHandler: throws
+notFoundHandler --> errorHandler

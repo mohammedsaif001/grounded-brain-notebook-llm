@@ -1,0 +1,16 @@
+// Grounded Brain: what one workspace delete removes (ON DELETE CASCADE)
+// Eraser "Flow Chart" diagram-as-code
+title Deleting a workspace cascades
+direction down
+colorMode bold
+
+DELETE workspace [shape: oval, icon: trash-2, color: red]
+source rows [icon: file-text, color: blue]
+source_chunk rows [icon: scissors, color: blue]
+conversation rows [icon: message-square, color: purple]
+message rows [icon: message-circle, color: purple]
+learning_artifact rows [icon: book-open, color: orange]
+
+DELETE workspace > source rows > source_chunk rows
+DELETE workspace > conversation rows > message rows
+DELETE workspace > learning_artifact rows

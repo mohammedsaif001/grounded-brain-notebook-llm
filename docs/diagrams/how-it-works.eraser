@@ -1,0 +1,24 @@
+// Grounded Brain: how it works (README overview)
+// Eraser "Flow Chart" diagram-as-code
+title How Grounded Brain works
+direction right
+colorMode bold
+
+User [shape: oval, icon: user, color: gray]
+Express API [icon: nodejs, color: green, label: "Express API (TypeScript)"]
+PostgreSQL [icon: postgres, color: blue, label: "PostgreSQL (Prisma)"]
+Inngest [icon: zap, color: purple, label: "Inngest background jobs"]
+OpenAI [icon: openai, color: orange]
+Pinecone [icon: database, color: blue]
+Mem0 [icon: brain, color: purple]
+
+User > Express API: add sources, ask questions
+Express API > PostgreSQL: save
+Express API > Inngest: events
+Inngest > OpenAI: extract · chunk · embed
+Inngest > Pinecone: index vectors
+Inngest > Mem0: learn memories
+Express API > Pinecone: question → relevant chunks
+Express API > Mem0: relevant memories
+Express API > OpenAI: grounded answer (streamed)
+Express API > User: streamed reply + citations

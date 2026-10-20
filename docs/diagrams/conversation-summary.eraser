@@ -1,0 +1,21 @@
+// Grounded Brain: rolling conversation summaries and learned memories
+// Eraser "Flow Chart" diagram-as-code
+title Rolling summaries and learned memories
+direction right
+colorMode bold
+
+Chat reply saved [shape: oval, icon: message-square, color: green]
+Due [shape: diamond, label: "messages − summaryMessageCount ≥ 8?"]
+Done [shape: oval, color: gray]
+Publish [icon: zap, color: purple, label: "EventPublisher.conversationSummaryRequested\nevent id = conversation + bucket (dedupes)"]
+Job [icon: message-square, color: purple, label: "summarize-conversation job\n(one at a time per conversation)"]
+OpenAI [icon: openai, color: orange, label: "OpenAI: previous summary + only NEW messages → updated summary"]
+Save summary [icon: postgres, color: blue, label: "UPDATE conversation.summary, summaryMessageCount"]
+Mem0 [icon: brain, color: purple, label: "Mem0: learn facts from new messages (max 16)"]
+
+Chat reply saved > Due
+Due > Done: no
+Due > Publish: yes
+Publish > Job
+Job > OpenAI > Save summary
+Job > Mem0

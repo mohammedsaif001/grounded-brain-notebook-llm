@@ -115,6 +115,13 @@ flowchart LR
     Svc -. OpenTelemetry spans .-> LF
 ```
 
+<details>
+<summary>Diagram not rendering (e.g. in the GitHub mobile app)? View it as an image</summary>
+
+![System architecture](images/architecture.png)
+
+</details>
+
 > An icon version (OpenAI, Postgres, Pinecone, Docker, Inngest logos) is in
 > [`diagrams/architecture.eraser`](diagrams/architecture.eraser). See [diagrams/README.md](diagrams/README.md)
 > for how to render it.
@@ -278,6 +285,13 @@ flowchart LR
     S --> E["EventPublisher<br/>→ Inngest"]
 ```
 
+<details>
+<summary>Diagram not rendering (e.g. in the GitHub mobile app)? View it as an image</summary>
+
+![Layered design](images/layered-design.png)
+
+</details>
+
 Rules the code follows:
 
 - **Controllers are thin.** They parse `req.params` / `req.body` / `req.query` with a Zod schema,
@@ -319,6 +333,13 @@ flowchart TD
     M -. throws .-> Q["errorHandler<br/>→ standard error envelope"]
     P -.-> Q
 ```
+
+<details>
+<summary>Diagram not rendering (e.g. in the GitHub mobile app)? View it as an image</summary>
+
+![Life of an HTTP request](images/request-lifecycle.png)
+
+</details>
 
 Why this order:
 
@@ -366,6 +387,13 @@ sequenceDiagram
     BA-->>API: { user, session }
     API-->>B: 200 { success: true, data: [...] }
 ```
+
+<details>
+<summary>Diagram not rendering (e.g. in the GitHub mobile app)? View it as an image</summary>
+
+![Authentication flow](images/auth-flow.png)
+
+</details>
 
 ---
 
@@ -458,6 +486,13 @@ sequenceDiagram
     API-->>C: READY
 ```
 
+<details>
+<summary>Diagram not rendering (e.g. in the GitHub mobile app)? View it as an image</summary>
+
+![Source ingestion pipeline](images/source-pipeline.png)
+
+</details>
+
 Details worth knowing:
 
 - **Each step is retried separately.** If embedding fails, extraction is not redone. The job
@@ -531,6 +566,13 @@ sequenceDiagram
     end
 ```
 
+<details>
+<summary>Diagram not rendering (e.g. in the GitHub mobile app)? View it as an image</summary>
+
+![Chat request flow](images/chat-flow.png)
+
+</details>
+
 Step by step ([`chat.service.ts`](../src/features/chat/chat.service.ts)):
 
 1. **Model choice:** `body.model`, else the workspace's `defaultModel`, else `gpt-4o-mini`. Only
@@ -582,6 +624,13 @@ flowchart LR
     E --> F["UPDATE conversation.summary, summaryMessageCount"]
     D --> G["Mem0: learn facts from the new messages (max 16)"]
 ```
+
+<details>
+<summary>Diagram not rendering (e.g. in the GitHub mobile app)? View it as an image</summary>
+
+![Rolling summaries and learned memories](images/conversation-summary.png)
+
+</details>
 
 - The model always sees the **last 12 messages** plus the **summary** of everything older.
 - Each run only sends the messages added since the last summary, so cost stays flat as the chat grows.
@@ -644,6 +693,13 @@ sequenceDiagram
     JOB->>PG: status READY + content (or FAILED + processingError)
     C->>AS: GET /artifacts/:id (polling)
 ```
+
+<details>
+<summary>Diagram not rendering (e.g. in the GitHub mobile app)? View it as an image</summary>
+
+![Artifact generation](images/artifact-generation.png)
+
+</details>
 
 - **Types:** `SUMMARY` (markdown), `TAKEAWAYS`, `FLASHCARDS`, `QUIZ`, `MINDMAP`, `REPORT`.
   All but `SUMMARY` use `Output.object({ schema })`, so the model must return JSON matching a
@@ -727,6 +783,13 @@ flowchart LR
     S4 --> E4 --> F2
     S5 --> E5 --> F3
 ```
+
+<details>
+<summary>Diagram not rendering (e.g. in the GitHub mobile app)? View it as an image</summary>
+
+![Background jobs](images/background-jobs.png)
+
+</details>
 
 | Function                 | Trigger                  | Steps                                                                         | Retries | Concurrency            | Cancelled by                          |
 | ------------------------ | ------------------------ | ----------------------------------------------------------------------------- | ------- | ---------------------- | ------------------------------------- |
@@ -931,6 +994,13 @@ flowchart LR
     D --> F["inngest: inngest-cli dev<br/>:8288 → /api/inngest"]
     D --> G["studio: prisma studio<br/>:5555"]
 ```
+
+<details>
+<summary>Diagram not rendering (e.g. in the GitHub mobile app)? View it as an image</summary>
+
+![npm run dev](images/dev-orchestration.png)
+
+</details>
 
 | Port   | Service                        |
 | ------ | ------------------------------ |

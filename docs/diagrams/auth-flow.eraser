@@ -1,0 +1,15 @@
+// Grounded Brain: sign-in and authenticated requests (Better Auth)
+// Eraser "Sequence Diagram" diagram-as-code
+title Authentication (Better Auth cookie sessions)
+autoNumber on
+
+Browser [icon: monitor, color: gray] > Express [icon: nodejs, color: green]: POST /api/auth/sign-in/email {email, password}
+Express > Better Auth [icon: lock, color: purple]: toNodeHandler(auth)
+Better Auth > Postgres [icon: postgres, color: blue]: verify account, create session row
+Better Auth --> Browser: 200 + Set-Cookie: session token
+
+Browser > Express: GET /api/workspaces (Cookie)
+Express > Better Auth: requireAuth → auth.api.getSession(headers)
+Better Auth > Postgres: look up session by token
+Better Auth --> Express: { user, session }
+Express --> Browser: 200 { success: true, data: [...] }

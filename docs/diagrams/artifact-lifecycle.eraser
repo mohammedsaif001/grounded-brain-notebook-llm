@@ -1,0 +1,16 @@
+// Grounded Brain: learning artifact status lifecycle
+// Eraser "Flow Chart" diagram-as-code
+title Artifact status lifecycle
+direction right
+colorMode bold
+
+Start [shape: oval, color: gray, label: "start"]
+PENDING [color: gray]
+PROCESSING [color: blue]
+READY [color: green]
+FAILED [color: red]
+
+Start > PENDING: POST /artifacts
+PENDING > PROCESSING: Inngest job starts
+PROCESSING > READY: content generated
+PROCESSING > FAILED: generation error

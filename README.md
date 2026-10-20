@@ -56,6 +56,13 @@ flowchart LR
     API -- "streamed reply + citations" --> U
 ```
 
+<details>
+<summary>Diagram not rendering (e.g. in the GitHub mobile app)? View it as an image</summary>
+
+![How it works](docs/images/how-it-works.png)
+
+</details>
+
 1. **Add a source.** The API stores it and fires an event. An **Inngest** job extracts the text,
    splits it into ~1000-character chunks with **LangChain**'s text splitter, embeds each chunk with
    **OpenAI**, and stores the vectors in **Pinecone** (one namespace per workspace).
@@ -126,6 +133,13 @@ flowchart LR
     S --> EXT["Tavily · Firecrawl · YouTube"]
     S -.-> LF["Langfuse"]
 ```
+
+<details>
+<summary>Diagram not rendering (e.g. in the GitHub mobile app)? View it as an image</summary>
+
+![Architecture](docs/images/architecture.png)
+
+</details>
 
 - **Layered:** routes → controllers (validate with Zod) → services (business rules, ownership
   checks) → repositories (the only code that touches Postgres, Pinecone or Mem0).
