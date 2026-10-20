@@ -1,4 +1,5 @@
 import { EventPublisher } from "../../jobs/events.js";
+import { logger } from "../../config/logger.js";
 import { WorkspaceRepository, type WorkspaceRecord } from "./workspace.repository.js";
 import { VectorRepository } from "../../shared/ai/vector.repository.js";
 import { APIError } from "../../shared/http/api-error.js";
@@ -54,7 +55,7 @@ export class WorkspaceService {
         try {
             await VectorRepository.deleteByWorkspaceId(workspaceId);
         } catch (error) {
-            console.error("Failed to delete Pinecone namespace:", error);
+            logger.warn({ err: error, workspaceId }, "Failed to delete Pinecone namespace");
         }
 
         await WorkspaceRepository.delete(workspaceId);

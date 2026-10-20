@@ -138,6 +138,7 @@ async function condenseSource(title: string, content: string, budget: number) {
                     system: condenseSourceSystem(Math.round(targetChars / 6)),
                     prompt: condenseSourcePrompt(title, i + offset + 1, segments.length, segment),
                     maxOutputTokens: Math.ceil(targetChars / 3),
+                    telemetry: { functionId: "artifact-condense" },
                 }),
             ),
         );
@@ -303,12 +304,14 @@ export class ArtifactGenerationService {
      */
     static async generateContent(type: ArtifactRecord["type"], sourceText: string) {
         const system = artifactSystem(type);
+        const telemetry = { functionId: `artifact-${type.toLowerCase()}` };
 
         switch (type) {
             case "SUMMARY": {
                 const result = await generateText({
                     model: openai(CHAT_MODEL),
                     system,
+                    telemetry,
                     prompt: ARTIFACT_PROMPTS.SUMMARY(sourceText),
                 });
                 return { markdown: result.text };
@@ -317,6 +320,7 @@ export class ArtifactGenerationService {
                 const result = await generateText({
                     model: openai(CHAT_MODEL),
                     system,
+                    telemetry,
                     output: Output.object({ schema: takeawaysSchema }),
                     prompt: ARTIFACT_PROMPTS.TAKEAWAYS(sourceText),
                 });
@@ -326,6 +330,7 @@ export class ArtifactGenerationService {
                 const result = await generateText({
                     model: openai(CHAT_MODEL),
                     system,
+                    telemetry,
                     output: Output.object({ schema: flashcardsSchema }),
                     prompt: ARTIFACT_PROMPTS.FLASHCARDS(sourceText),
                 });
@@ -335,6 +340,7 @@ export class ArtifactGenerationService {
                 const result = await generateText({
                     model: openai(CHAT_MODEL),
                     system,
+                    telemetry,
                     output: Output.object({ schema: quizSchema }),
                     prompt: ARTIFACT_PROMPTS.QUIZ(sourceText),
                 });
@@ -344,6 +350,7 @@ export class ArtifactGenerationService {
                 const result = await generateText({
                     model: openai(CHAT_MODEL),
                     system,
+                    telemetry,
                     output: Output.object({ schema: mindmapSchema }),
                     prompt: ARTIFACT_PROMPTS.MINDMAP(sourceText),
                 });
@@ -353,6 +360,7 @@ export class ArtifactGenerationService {
                 const result = await generateText({
                     model: openai(CHAT_MODEL),
                     system,
+                    telemetry,
                     output: Output.object({ schema: reportSchema }),
                     prompt: ARTIFACT_PROMPTS.REPORT(sourceText),
                 });

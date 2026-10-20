@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { propagateAttributes } from "@langfuse/tracing";
 import { inngest } from "../config/inngest.js";
 import { ArtifactService } from "../features/artifact/artifact.service.js";
 import { ConversationMemoryService } from "../features/conversation/conversation-memory.service.js";
@@ -71,9 +72,11 @@ const generateArtifact = inngest.createFunction(
     async ({ event, step }) => {
         const { artifactId } = artifactEventSchema.parse(event.data);
 
-        await step.run("generate", async () => {
-            await ArtifactService.generate(artifactId);
-        });
+        await step.run("generate", () =>
+            propagateAttributes({ traceName: "generate-artifact", metadata: { artifactId } }, () =>
+                ArtifactService.generate(artifactId),
+            ),
+        );
 
         return { artifactId, status: "READY" };
     },
@@ -91,7 +94,10 @@ const summarizeConversation = inngest.createFunction(
         const { conversationId, userId } = conversationEventSchema.parse(event.data);
 
         await step.run("summarize", async () => {
-            await ConversationMemoryService.summarize(conversationId, userId);
+            await propagateAttributes(
+                { userId, sessionId: conversationId, traceName: "summarize-conversation" },
+                () => ConversationMemoryService.summarize(conversationId, userId),
+            );
         });
 
         return { conversationId, status: "SUMMARIZED" };

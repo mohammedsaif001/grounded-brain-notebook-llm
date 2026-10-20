@@ -29,6 +29,8 @@ const envSchema = z
         // Number of reverse proxies in front of the app (load balancer, CDN). Needed so
         // rate limiting sees the real client IP instead of the proxy's. 0 = no proxy.
         TRUST_PROXY_HOPS: z.coerce.number().int().min(0).default(0),
+        // Defaults to "debug" in development and "info" in production.
+        LOG_LEVEL: optional(z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])),
 
         DATABASE_URL: z.url(),
 
@@ -58,6 +60,12 @@ const envSchema = z
         FIRECRAWL_API_KEY: optionalString,
         TAVILY_API_KEY: optionalString,
         MEM0_API_KEY: optionalString,
+
+        // LLM tracing; disabled when the keys are unset.
+        LANGFUSE_PUBLIC_KEY: optionalString,
+        LANGFUSE_SECRET_KEY: optionalString,
+        // EU cloud by default; US is https://us.cloud.langfuse.com, or your self-hosted URL.
+        LANGFUSE_BASE_URL: optional(z.url()),
     })
     .superRefine((value, ctx) => {
         const requireTogether = (keys: (keyof typeof value)[], reason: string) => {
@@ -79,6 +87,7 @@ const envSchema = z
             ["CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET"],
             "signed Cloudinary downloads",
         );
+        requireTogether(["LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"], "Langfuse tracing");
 
         const inngestDev = value.INNGEST_DEV === "1" || value.INNGEST_DEV === "true";
 

@@ -4,6 +4,7 @@
 
 import { generateText } from "ai";
 import { CHAT_MODEL, RAG_MIN_SCORE, RAG_TOP_K } from "../../config/ai.config.js";
+import { logger } from "../../config/logger.js";
 import { openai } from "../../config/openai.js";
 import { QUERY_REWRITE_SYSTEM, queryRewritePrompt } from "../../config/prompts.js";
 import { EmbeddingClient } from "../../shared/ai/embeddings.js";
@@ -38,11 +39,12 @@ export class RetrievalService {
                 system: QUERY_REWRITE_SYSTEM,
                 prompt: queryRewritePrompt(transcript, userText),
                 maxOutputTokens: 120,
+                telemetry: { functionId: "query-rewrite" },
             });
 
             return text.trim() || userText;
         } catch (error) {
-            console.error("Query rewrite failed, using raw message:", error);
+            logger.warn({ err: error }, "Query rewrite failed, using raw message");
             return userText;
         }
     }

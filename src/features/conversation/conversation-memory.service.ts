@@ -46,6 +46,7 @@ export class ConversationMemoryService {
             model: openai(CHAT_MODEL),
             system: CONVERSATION_SUMMARY_SYSTEM,
             prompt: conversationSummaryPrompt(transcript, previousSummary),
+            telemetry: { functionId: "conversation-summary" },
         });
 
         const updated = await ConversationRepository.updateSummary(conversationId, {

@@ -31,7 +31,6 @@ const DB_UNAVAILABLE_CODES = new Set([
  */
 function fromPrismaError(error: unknown): APIError | null {
     if (error instanceof Prisma.PrismaClientInitializationError) {
-        console.error(error);
         return APIError.ServiceUnavailable("Database is unavailable. Please try again shortly.");
     }
 
@@ -40,7 +39,6 @@ function fromPrismaError(error: unknown): APIError | null {
     }
 
     if (DB_UNAVAILABLE_CODES.has(error.code)) {
-        console.error(error);
         return APIError.ServiceUnavailable("Database is unavailable. Please try again shortly.");
     }
 
@@ -106,7 +104,6 @@ function toAPIError(error: unknown): APIError {
         );
     }
 
-    console.error(error);
     return APIError.Internal();
 }
 
@@ -117,7 +114,15 @@ export function errorHandler(error: unknown, _req: Request, res: Response, next:
         return;
     }
 
-    APIResponse.Error(res, toAPIError(error));
+    const apiError = toAPIError(error);
+
+    // Server-side failures: attach the original error so pino-http logs it (with the
+    // request id) on the request's completion line. Client errors aren't worth a stack.
+    if (apiError.statusCode >= 500 && error instanceof Error) {
+        res.err = error;
+    }
+
+    APIResponse.Error(res, apiError);
 }
 
 /** Catch-all for unmatched routes; register after all routes, before {@link errorHandler}. */

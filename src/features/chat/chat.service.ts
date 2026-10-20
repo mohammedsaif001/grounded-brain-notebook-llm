@@ -14,6 +14,7 @@
  */
 
 import type { Response } from "express";
+import { propagateAttributes } from "@langfuse/tracing";
 import { z } from "zod";
 import {
     createUIMessageStream,
@@ -34,6 +35,7 @@ import {
     RECENT_MESSAGE_WINDOW,
 } from "../../config/ai.config.js";
 import { ChatPrompt } from "./chat-prompt.js";
+import { logger } from "../../config/logger.js";
 import { isOpenAIRateLimitError, openai } from "../../config/openai.js";
 import { TavilyClient } from "../../config/tavily.js";
 import { TavilySearch, type TavilySearchResult } from "./web-search/tavily.js";
@@ -110,7 +112,21 @@ export class ChatService {
      * @throws {APIError} BadRequest when no user message text is present
      * @throws {APIError} NotFound when the conversation or workspace is not found
      */
-    static async stream(res: Response, workspaceId: string, userId: string, input: ChatInput) {
+    static stream(res: Response, workspaceId: string, userId: string, input: ChatInput) {
+        // Tags every LLM trace in this request (query rewrite + reply) with the user and
+        // conversation. A brand-new conversation has no id yet, so its first turn has no session.
+        return propagateAttributes(
+            { userId, sessionId: input.conversationId, traceName: "chat" },
+            () => this.streamReply(res, workspaceId, userId, input),
+        );
+    }
+
+    private static async streamReply(
+        res: Response,
+        workspaceId: string,
+        userId: string,
+        input: ChatInput,
+    ) {
         const workspace = await WorkspaceService.getForUser(workspaceId, userId);
         const requestedModel = input.model ?? workspace.defaultModel;
         const chatModel = CHAT_MODELS.find((model) => model === requestedModel) ?? CHAT_MODEL;
@@ -181,7 +197,7 @@ export class ChatService {
                 if (isOpenAIRateLimitError(error)) {
                     return "The AI provider is rate limiting requests. Please try again shortly.";
                 }
-                console.error("Chat stream failed:", error);
+                logger.error({ err: error, conversationId: conversation.id }, "Chat stream failed");
                 return "Something went wrong while generating a reply. Please try again.";
             },
             execute: ({ writer }) => {
@@ -211,6 +227,7 @@ export class ChatService {
                     messages: modelMessages,
                     tools,
                     stopWhen: webSearchEnabled ? isStepCount(3) : undefined,
+                    telemetry: { functionId: "chat" },
                 });
 
                 writer.merge(toUIMessageStream({ stream: result.stream }));
@@ -254,9 +271,9 @@ export class ChatService {
                         });
                     }
                 } catch (error) {
-                    console.error(
-                        `Failed to persist assistant reply for conversation ${conversation.id}:`,
-                        error,
+                    logger.error(
+                        { err: error, conversationId: conversation.id },
+                        "Failed to persist assistant reply",
                     );
                 }
             },
