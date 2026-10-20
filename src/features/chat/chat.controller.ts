@@ -4,6 +4,7 @@ import { ChatService } from "./chat.service.js";
 import { chatBodySchema } from "./chat.validator.js";
 import { workspaceIdParamSchema } from "../workspace/workspace.validator.js";
 
+/** HTTP handler for `/api/workspaces/:workspaceId/chat`. */
 export class ChatController {
     /** Streams the reply as an AI SDK UI message stream (not the JSON envelope). */
     static stream = async (req: Request, res: Response) => {

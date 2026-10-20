@@ -28,6 +28,7 @@ function escapeDelimiters(text: string) {
     return text.replace(/<\/?(sources|source|memories)\b/gi, (match) => match.replace("<", "&lt;"));
 }
 
+/** Builds the prompts sent to the chat model and parses its citations. */
 export class ChatPrompt {
     /**
      * Builds the chat system prompt: behavior rules, user memories, and conversation summary.
@@ -35,6 +36,12 @@ export class ChatPrompt {
      * Retrieved source text is deliberately NOT placed here; it goes into the user turn via
      * {@link ChatPrompt.buildUserPrompt} so untrusted document content never carries
      * system-level authority.
+     *
+     * @param input.hasSourceContext - Whether any source chunks were retrieved (switches grounding rules)
+     * @param input.conversationSummary - Rolling summary of earlier turns, if one exists
+     * @param input.userMemories - Mem0 facts about the user relevant to this message
+     * @param input.webSearchEnabled - Whether the `web_search` tool is available this turn
+     * @returns The system prompt text
      */
     static buildSystemPrompt(input: {
         hasSourceContext: boolean;
@@ -82,6 +89,7 @@ export class ChatPrompt {
      *
      * @param chunks - Retrieved chunks; their 1-based position is the citation number
      * @param userText - The user's actual question
+     * @returns `userText` unchanged when there are no chunks, otherwise a `<sources>` block plus the question
      */
     static buildUserPrompt(chunks: RetrievedChunk[], userText: string) {
         if (chunks.length === 0) {
@@ -108,6 +116,7 @@ export class ChatPrompt {
      *
      * Handles `[1]`, `[W2]`, and grouped forms like `[1, 3]` or `[W1, W2]`.
      *
+     * @param text - The assistant's answer
      * @returns 1-based source numbers and web result numbers that were cited
      */
     static extractCitationMarkers(text: string) {

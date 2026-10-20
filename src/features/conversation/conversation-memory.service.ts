@@ -19,6 +19,7 @@ export class ConversationMemoryService {
      * summary, so cost stays flat as the conversation grows. The same new messages are sent
      * to Mem0 for memory extraction; this is the only place chat memories are learned.
      *
+     * @param conversationId - Conversation to summarize
      * @param userId - Owner of the conversation (used for Mem0)
      * @returns Updated conversation with `summary` and `summaryMessageCount`
      * @throws When the conversation does not exist

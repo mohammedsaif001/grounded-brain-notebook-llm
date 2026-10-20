@@ -12,6 +12,7 @@ import { VectorRepository } from "../../shared/ai/vector.repository.js";
 import type { ConversationTurn } from "../conversation/conversation.types.js";
 import type { RetrievedChunk } from "./chat.types.js";
 
+/** Finds the workspace source chunks relevant to a chat message. */
 export class RetrievalService {
     /**
      * Rewrites the latest user message into a standalone search query using recent turns.

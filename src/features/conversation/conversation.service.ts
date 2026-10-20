@@ -9,7 +9,12 @@ const MAX_TITLE_LENGTH = 72;
 
 /** Conversations and their message history. Other features (chat) go through this service. */
 export class ConversationService {
-    /** Builds a sidebar title from a user message, truncated to {@link MAX_TITLE_LENGTH}. */
+    /**
+     * Builds a sidebar title from a user message, truncated to {@link MAX_TITLE_LENGTH}.
+     *
+     * @param text - Message text; whitespace is collapsed
+     * @returns The title, or `"New chat"` when the text is blank
+     */
     private static buildTitle(text: string) {
         const normalized = text.replace(/\s+/g, " ").trim();
         if (!normalized) {
@@ -21,7 +26,12 @@ export class ConversationService {
             : normalized;
     }
 
-    /** Lists conversations in a workspace, most recently active first. */
+    /**
+     * Lists conversations in a workspace, most recently active first.
+     *
+     * @param workspaceId - Workspace to list from
+     * @param userId - Requesting user; must own the workspace
+     */
     static async list(workspaceId: string, userId: string) {
         await WorkspaceService.getForUser(workspaceId, userId);
         return ConversationRepository.findAllByWorkspaceId(workspaceId);
@@ -30,6 +40,10 @@ export class ConversationService {
     /**
      * Creates an empty conversation for an explicit "new chat" action.
      * Most chats are created implicitly on the first message (see {@link ConversationService.getOrCreate}).
+     *
+     * @param workspaceId - Workspace to create in
+     * @param userId - Requesting user; must own the workspace
+     * @param title - Optional title
      */
     static async create(workspaceId: string, userId: string, title?: string) {
         await WorkspaceService.getForUser(workspaceId, userId);
@@ -39,6 +53,9 @@ export class ConversationService {
     /**
      * Loads a conversation in a workspace the user owns.
      *
+     * @param workspaceId - Workspace the conversation belongs to
+     * @param conversationId - Conversation to load
+     * @param userId - Requesting user
      * @throws {APIError} NotFound when the workspace or conversation is not found
      */
     static async get(workspaceId: string, conversationId: string, userId: string) {
@@ -59,6 +76,10 @@ export class ConversationService {
     /**
      * Returns the full persisted message history of a conversation.
      *
+     * @param workspaceId - Workspace the conversation belongs to
+     * @param conversationId - Conversation to read
+     * @param userId - Requesting user
+     * @returns Messages, oldest first
      * @throws {APIError} NotFound when the conversation does not exist in this workspace
      */
     static async listMessages(workspaceId: string, conversationId: string, userId: string) {
@@ -69,6 +90,9 @@ export class ConversationService {
     /**
      * Deletes a conversation and all its messages (cascade).
      *
+     * @param workspaceId - Workspace the conversation belongs to
+     * @param conversationId - Conversation to delete
+     * @param userId - Requesting user
      * @throws {APIError} NotFound when the conversation does not exist
      */
     static async delete(workspaceId: string, conversationId: string, userId: string) {
@@ -80,6 +104,10 @@ export class ConversationService {
      * Returns the given conversation, or creates one titled from the first message.
      * Assumes workspace ownership was already verified by the caller.
      *
+     * @param workspaceId - Workspace the conversation belongs to
+     * @param conversationId - Existing conversation id, or `undefined` to start a new one
+     * @param firstMessage - User message used to title a newly created conversation
+     * @returns The existing or newly created conversation
      * @throws {APIError} NotFound when `conversationId` is provided but not found
      */
     static async getOrCreate(
@@ -103,12 +131,22 @@ export class ConversationService {
         return existing;
     }
 
-    /** Appends a message to a conversation. */
+    /**
+     * Appends a message to a conversation.
+     *
+     * @param data - Conversation id, role, content and optional citations
+     * @returns The saved message
+     */
     static addMessage(data: CreateMessageData) {
         return MessageRepository.create(data);
     }
 
-    /** Latest `limit` messages as model turns, oldest first. */
+    /**
+     * Latest `limit` messages as model turns, oldest first.
+     *
+     * @param conversationId - Conversation to read
+     * @param limit - Maximum number of messages
+     */
     static async getRecentTurns(
         conversationId: string,
         limit: number,
@@ -121,16 +159,30 @@ export class ConversationService {
         }));
     }
 
+    /**
+     * Counts the persisted messages in a conversation.
+     *
+     * @param conversationId - Conversation to count
+     */
     static countMessages(conversationId: string) {
         return MessageRepository.countByConversationId(conversationId);
     }
 
-    /** Bumps `updatedAt` so the conversation sorts to the top of the sidebar. */
+    /**
+     * Bumps `updatedAt` so the conversation sorts to the top of the sidebar.
+     *
+     * @param conversationId - Conversation to touch
+     */
     static async touch(conversationId: string) {
         await ConversationRepository.touch(conversationId);
     }
 
-    /** Sets a title from `firstMessage` if the conversation doesn't have one yet. */
+    /**
+     * Sets a title from `firstMessage` if the conversation doesn't have one yet.
+     *
+     * @param conversation - Conversation to title
+     * @param firstMessage - Message the title is derived from
+     */
     static async ensureTitle(conversation: ConversationRecord, firstMessage: string) {
         if (!conversation.title) {
             await ConversationRepository.update(conversation.id, {

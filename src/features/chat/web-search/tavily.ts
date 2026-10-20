@@ -4,6 +4,7 @@
 
 import { TavilyClient } from "../../../config/tavily.js";
 
+/** One normalised web result. */
 export type TavilySearchResult = {
     title: string;
     url: string;
@@ -11,12 +12,14 @@ export type TavilySearchResult = {
     score?: number;
 };
 
+/** Normalised response for one search query. */
 export type TavilySearchResponse = {
     query: string;
     answer?: string;
     results: TavilySearchResult[];
 };
 
+/** Runs Tavily web searches and formats them for the chat model. */
 export class TavilySearch {
     /**
      * Runs a web search query.
@@ -52,6 +55,7 @@ export class TavilySearch {
      *
      * @param response - Normalized search response
      * @param startIndex - Number of web results already shown to the model in this reply
+     * @returns Text block returned to the model as the tool result
      */
     static formatResultsForPrompt(response: TavilySearchResponse, startIndex = 0): string {
         if (response.results.length === 0) {

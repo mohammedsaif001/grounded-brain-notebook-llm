@@ -1,6 +1,7 @@
 import type { Prisma } from "../../generated/prisma/client.js";
 import prisma from "../../config/db.js";
 
+/** Columns returned for every conversation query. */
 export const conversationSelect = {
     id: true,
     workspaceId: true,
@@ -12,12 +13,18 @@ export const conversationSelect = {
     updatedAt: true,
 } as const;
 
+/** A conversation row as returned by this repository. */
 export type ConversationRecord = Prisma.ConversationGetPayload<{
     select: typeof conversationSelect;
 }>;
 
 /** Data access for conversations (Postgres). */
 export class ConversationRepository {
+    /**
+     * Finds all conversations in a workspace, most recently updated first.
+     *
+     * @param workspaceId - Owning workspace
+     */
     static findAllByWorkspaceId(workspaceId: string) {
         return prisma.conversation.findMany({
             where: { workspaceId },
@@ -26,6 +33,12 @@ export class ConversationRepository {
         });
     }
 
+    /**
+     * Finds a conversation by id regardless of workspace (used by background jobs).
+     *
+     * @param conversationId - Conversation id
+     * @returns The conversation, or `null` when missing
+     */
     static findById(conversationId: string) {
         return prisma.conversation.findUnique({
             where: { id: conversationId },
@@ -33,6 +46,13 @@ export class ConversationRepository {
         });
     }
 
+    /**
+     * Finds a conversation only if it belongs to the given workspace.
+     *
+     * @param conversationId - Conversation id
+     * @param workspaceId - Workspace it must belong to
+     * @returns The conversation, or `null` when not found in that workspace
+     */
     static findByIdAndWorkspaceId(conversationId: string, workspaceId: string) {
         return prisma.conversation.findFirst({
             where: { id: conversationId, workspaceId },
@@ -40,6 +60,12 @@ export class ConversationRepository {
         });
     }
 
+    /**
+     * Inserts a conversation.
+     *
+     * @param workspaceId - Owning workspace
+     * @param title - Optional title; stored as `null` when omitted
+     */
     static create(workspaceId: string, title?: string) {
         return prisma.conversation.create({
             data: {
@@ -50,6 +76,12 @@ export class ConversationRepository {
         });
     }
 
+    /**
+     * Updates a conversation's title.
+     *
+     * @param conversationId - Conversation to update
+     * @param data.title - New title, or `null` to clear it
+     */
     static update(conversationId: string, data: { title?: string | null }) {
         return prisma.conversation.update({
             where: { id: conversationId },
@@ -58,6 +90,14 @@ export class ConversationRepository {
         });
     }
 
+    /**
+     * Stores a new rolling summary and records how many messages it covers.
+     *
+     * @param conversationId - Conversation to update
+     * @param data.summary - Summary text
+     * @param data.summaryMessageCount - Number of messages summarised so far
+     * @returns The updated conversation (`summarizedAt` set to now)
+     */
     static updateSummary(
         conversationId: string,
         data: {
@@ -76,7 +116,11 @@ export class ConversationRepository {
         });
     }
 
-    /** Bumps `updatedAt` so the conversation sorts to the top of the sidebar. */
+    /**
+     * Bumps `updatedAt` so the conversation sorts to the top of the sidebar.
+     *
+     * @param conversationId - Conversation to touch
+     */
     static touch(conversationId: string) {
         return prisma.conversation.update({
             where: { id: conversationId },
@@ -85,6 +129,11 @@ export class ConversationRepository {
         });
     }
 
+    /**
+     * Deletes a conversation (its messages are removed by database cascade).
+     *
+     * @param conversationId - Conversation to delete
+     */
     static async delete(conversationId: string) {
         await prisma.conversation.delete({
             where: { id: conversationId },

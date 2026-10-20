@@ -47,6 +47,7 @@ import type { RetrievedChunk } from "./chat.types.js";
 import { RetrievalService } from "./retrieval.service.js";
 import { WorkspaceService } from "../workspace/workspace.service.js";
 
+/** Input to {@link ChatService.stream}, mirroring the validated request body. */
 export type ChatInput = {
     conversationId?: string;
     messages: UIMessage[];
@@ -54,10 +55,16 @@ export type ChatInput = {
     webSearch?: boolean;
 };
 
+/** Orchestrates a streamed, source-grounded chat reply. */
 export class ChatService {
     /**
      * Keeps only the sources and web results the answer actually cites.
      * `marker` is the number used in the text (`[n]` for sources, `[Wn]` for web results).
+     *
+     * @param assistantText - The full reply, scanned for citation markers
+     * @param retrievedChunks - Chunks shown to the model; position + 1 is the marker number
+     * @param webResults - Web results shown to the model; position + 1 is the `W` marker number
+     * @returns Citation objects stored with the assistant message
      */
     private static buildCitations(
         assistantText: string,
@@ -108,6 +115,9 @@ export class ChatService {
      * payload are ignored in favour of the persisted history.
      *
      * @param res - Express response (streamed via `pipeUIMessageStreamToResponse`)
+     * @param workspaceId - Workspace whose sources to search
+     * @param userId - Requesting user; must own the workspace
+     * @param input - Conversation id, messages, model choice and web-search flag
      * @returns Writes the UI message stream to `res`; sets `X-Conversation-Id` header
      * @throws {APIError} BadRequest when no user message text is present
      * @throws {APIError} NotFound when the conversation or workspace is not found
@@ -121,6 +131,16 @@ export class ChatService {
         );
     }
 
+    /**
+     * Does the actual work of {@link ChatService.stream}: saves the user message, rewrites the
+     * query, retrieves chunks and memories, streams the model reply, then persists the answer
+     * (with citations) and queues a summary job when due.
+     *
+     * @param res - Express response the stream is piped to
+     * @param workspaceId - Workspace whose sources to search
+     * @param userId - Requesting user
+     * @param input - Chat request input
+     */
     private static async streamReply(
         res: Response,
         workspaceId: string,
