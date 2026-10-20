@@ -38,6 +38,8 @@ configured (the server answers 503) are reported as SKIP, not FAIL.
 ### System
 
 - `GET /health` returns `{ status: "ok" }`
+- `GET /health/ready` returns 200: database, Pinecone, OpenAI and Inngest are up. On failure it
+  lists which dependency is down and why.
 - Unknown routes return a 404 in the standard error envelope
 - Every response carries an `X-Request-Id` header
 

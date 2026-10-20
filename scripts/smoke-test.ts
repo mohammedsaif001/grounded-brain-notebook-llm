@@ -36,7 +36,11 @@ type ApiResponse = {
     status: number;
     headers: Headers;
     /** Parsed JSON body (the `{ success, data | error }` envelope), or null. */
-    body: { success?: boolean; data?: any; error?: { code: string; message: string } } | null;
+    body: {
+        success?: boolean;
+        data?: any;
+        error?: { code: string; message: string; details?: any };
+    } | null;
     text: string;
 };
 
@@ -288,6 +292,16 @@ async function main() {
         const res = await a.get("/health");
         expectStatus(res, 200);
         expect(res.body?.data?.status === "ok", "status is not ok");
+    });
+    await step("GET /health/ready: required dependencies are up", async () => {
+        const res = await a.get("/health/ready");
+        const report = res.body?.data ?? res.body?.error?.details;
+        const checks = Object.entries((report?.checks ?? {}) as Record<string, any>);
+        const down = checks
+            .filter(([, c]) => c.status === "down")
+            .map(([name, c]) => `${name}: ${c.error ?? "down"}`);
+        expect(res.status === 200, `status ${report?.status}; down → ${down.join(", ")}`);
+        return checks.map(([name, c]) => `${name} ${c.status}`).join(", ");
     });
     await step("unknown route returns 404 envelope", async () => {
         const res = await a.get("/api/does-not-exist");

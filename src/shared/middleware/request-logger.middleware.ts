@@ -28,7 +28,8 @@ export const requestLogger = pinoHttp({
         if (res.statusCode >= 400) return "warn";
         return "info";
     },
-    autoLogging: { ignore: (req) => req.url === "/health" },
+    // Health probes are polled constantly; logging them would drown out real traffic.
+    autoLogging: { ignore: (req) => req.url?.startsWith("/health") ?? false },
     serializers: {
         req: (req: { id: string; method: string; url: string }) => ({
             id: req.id,

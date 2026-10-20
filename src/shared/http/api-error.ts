@@ -81,7 +81,7 @@ export class APIError extends Error {
     }
 
     /** 503 — a required integration is not configured or unavailable. */
-    static ServiceUnavailable(message = "Service unavailable") {
-        return new APIError(503, "SERVICE_UNAVAILABLE", message);
+    static ServiceUnavailable(message = "Service unavailable", details?: unknown) {
+        return new APIError(503, "SERVICE_UNAVAILABLE", message, details);
     }
 }

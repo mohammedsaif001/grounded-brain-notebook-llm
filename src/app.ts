@@ -11,6 +11,7 @@ import { serve } from "inngest/express";
 import { auth } from "./config/auth.js";
 import { env } from "./config/env.js";
 import { inngest } from "./config/inngest.js";
+import { healthRouter } from "./features/health/health.routes.js";
 import { functions } from "./jobs/index.js";
 import { registerRoutes } from "./routes.js";
 import { APIResponse } from "./shared/http/api-response.js";
@@ -50,9 +51,7 @@ app.get("/", (_req, res) => {
     APIResponse.Ok(res, null, "Hello from Grounded Notebook API");
 });
 
-app.get("/health", (_req, res) => {
-    APIResponse.Ok(res, { status: "ok" });
-});
+app.use("/health", healthRouter);
 
 app.get("/api/me", requireAuth, (req, res) => {
     APIResponse.Ok(res, req.session.user);
