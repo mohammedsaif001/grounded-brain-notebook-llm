@@ -1,12 +1,11 @@
 /**
- * Firecrawl client for scraping website content into markdown sources.
+ * Scrapes website content into markdown sources via Firecrawl.
  */
 
-import Firecrawl from "@mendable/firecrawl-js";
-import { env } from "../../../config/env.js";
+import { FirecrawlClient } from "../../../config/firecrawl.js";
 import { APIError } from "../../../shared/http/api-error.js";
 
-export class FirecrawlClient {
+export class FirecrawlScraper {
     /**
      * Scrapes a public URL and returns clean markdown suitable for RAG indexing.
      *
@@ -15,12 +14,7 @@ export class FirecrawlClient {
      * @throws {APIError} ServiceUnavailable when Firecrawl is not configured; BadRequest when extraction fails
      */
     static async scrape(url: string) {
-        if (!env.FIRECRAWL_API_KEY) {
-            throw APIError.ServiceUnavailable("Firecrawl is not configured on the server");
-        }
-
-        const client = new Firecrawl({ apiKey: env.FIRECRAWL_API_KEY });
-        const result = await client.scrape(url, {
+        const result = await FirecrawlClient.get().scrape(url, {
             formats: ["markdown"],
         });
 

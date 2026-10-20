@@ -1,7 +1,7 @@
 import type { Prisma } from "../../generated/prisma/client.js";
 import { EventPublisher } from "../../jobs/events.js";
 import { CloudinaryStorage } from "./ingestion/cloudinary.js";
-import { FirecrawlClient } from "./ingestion/firecrawl.js";
+import { FirecrawlScraper } from "./ingestion/firecrawl.js";
 import { PdfExtractor } from "./ingestion/pdf.js";
 import { PdfValidator } from "./ingestion/pdf-validator.js";
 import { YoutubeClient } from "./ingestion/youtube.js";
@@ -139,7 +139,7 @@ export class SourceService {
     static async importWebsite(workspaceId: string, userId: string, input: ImportWebsiteInput) {
         await WorkspaceService.getForUser(workspaceId, userId);
 
-        const scraped = await FirecrawlClient.scrape(input.url);
+        const scraped = await FirecrawlScraper.scrape(input.url);
 
         return this.createAndQueue({
             workspaceId,

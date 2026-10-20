@@ -35,7 +35,8 @@ import {
 } from "../../config/ai.config.js";
 import { ChatPrompt } from "./chat-prompt.js";
 import { isOpenAIRateLimitError, openai } from "../../config/openai.js";
-import { TavilyClient, type TavilySearchResult } from "./web-search/tavily.js";
+import { TavilyClient } from "../../config/tavily.js";
+import { TavilySearch, type TavilySearchResult } from "./web-search/tavily.js";
 import { APIError } from "../../shared/http/api-error.js";
 import { UIMessageUtils } from "./chat-message.util.js";
 import { ConversationService } from "../conversation/conversation.service.js";
@@ -195,10 +196,10 @@ export class ChatService {
                                       .describe("The search query for current web information"),
                               }),
                               execute: async ({ query }) => {
-                                  const response = await TavilyClient.search(query);
+                                  const response = await TavilySearch.search(query);
                                   const startIndex = webResults.length;
                                   webResults.push(...response.results);
-                                  return TavilyClient.formatResultsForPrompt(response, startIndex);
+                                  return TavilySearch.formatResultsForPrompt(response, startIndex);
                               },
                           }),
                       }

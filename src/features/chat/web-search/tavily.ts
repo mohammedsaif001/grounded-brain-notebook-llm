@@ -1,10 +1,8 @@
 /**
- * Tavily client for the chat `web_search` tool.
+ * Web search for the chat `web_search` tool, backed by Tavily.
  */
 
-import { tavily } from "@tavily/core";
-import { env } from "../../../config/env.js";
-import { APIError } from "../../../shared/http/api-error.js";
+import { TavilyClient } from "../../../config/tavily.js";
 
 export type TavilySearchResult = {
     title: string;
@@ -19,14 +17,7 @@ export type TavilySearchResponse = {
     results: TavilySearchResult[];
 };
 
-export class TavilyClient {
-    private static client: ReturnType<typeof tavily> | null = null;
-
-    /** Whether web search is available. */
-    static isConfigured() {
-        return !!env.TAVILY_API_KEY;
-    }
-
+export class TavilySearch {
     /**
      * Runs a web search query.
      *
@@ -35,15 +26,7 @@ export class TavilyClient {
      * @throws {APIError} ServiceUnavailable when `TAVILY_API_KEY` is not configured
      */
     static async search(query: string): Promise<TavilySearchResponse> {
-        if (!env.TAVILY_API_KEY) {
-            throw APIError.ServiceUnavailable("Web search is not configured on the server");
-        }
-
-        if (!this.client) {
-            this.client = tavily({ apiKey: env.TAVILY_API_KEY });
-        }
-
-        const response = await this.client.search(query, {
+        const response = await TavilyClient.get().search(query, {
             searchDepth: "basic",
             maxResults: 5,
             includeAnswer: true,
