@@ -9,6 +9,12 @@
 import pino from "pino";
 import { env, isProduction } from "./env.js";
 
+/**
+ * Root pino logger. Use `logger.child({ component })` for module-scoped loggers.
+ *
+ * Level comes from `LOG_LEVEL`, defaulting to `info` in production and `debug` otherwise.
+ * Auth and cookie headers are redacted from logged requests/responses.
+ */
 export const logger = pino({
     level: env.LOG_LEVEL ?? (isProduction ? "info" : "debug"),
     redact: {

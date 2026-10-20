@@ -1,3 +1,8 @@
+/**
+ * AI and RAG tuning constants: model choices, chunking, retrieval thresholds,
+ * conversation windows, and artifact context limits.
+ */
+
 /** Default chat model when the client or workspace does not specify one. */
 export const CHAT_MODEL = "gpt-4o-mini";
 

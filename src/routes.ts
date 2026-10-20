@@ -1,3 +1,7 @@
+/**
+ * Central place where feature routers are attached to the Express app.
+ */
+
 import type { Express } from "express";
 import { artifactRouter } from "./features/artifact/artifact.routes.js";
 import { chatRouter } from "./features/chat/chat.routes.js";
@@ -12,6 +16,8 @@ import { workspaceRouter } from "./features/workspace/workspace.routes.js";
  * Request flow: routes → controllers → services → repositories.
  * Workspace-scoped routers are nested under `workspaceRouter`, so they inherit its
  * `requireAuth` and receive `:workspaceId` via `mergeParams`.
+ *
+ * @param app - The Express application to mount routes on
  */
 export function registerRoutes(app: Express): void {
     workspaceRouter.use("/:workspaceId/sources", sourceRouter);

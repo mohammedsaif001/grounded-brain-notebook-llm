@@ -8,6 +8,12 @@
 import { v2 as cloudinary } from "cloudinary";
 import { env } from "./env.js";
 
+/**
+ * Capability flags derived from which Cloudinary env vars are set.
+ *
+ * Callers check `canUpload` / `canSign` before using Cloudinary so that PDF uploads
+ * degrade gracefully when the integration isn't configured.
+ */
 export const cloudinaryConfig = {
     cloudName: env.CLOUDINARY_CLOUD_NAME,
     uploadPreset: env.CLOUDINARY_UPLOAD_PRESET,

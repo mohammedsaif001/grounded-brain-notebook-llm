@@ -24,12 +24,16 @@ export type VectorMetadata = {
     page?: number;
 };
 
+/** Singleton Pinecone connection that creates the index on first use. */
 export class PineconeClient {
     private static client: Pinecone | null = null;
+    /** Set once the index is known to exist and be ready, so later calls skip the checks. */
     private static indexReady = false;
 
+    /** Name of the Pinecone index (from `PINECONE_INDEX`). */
     static readonly indexName = env.PINECONE_INDEX;
 
+    /** Returns the lazily created Pinecone SDK client. */
     private static getClient() {
         if (!this.client) {
             this.client = new Pinecone({ apiKey: env.PINECONE_API_KEY });
@@ -82,7 +86,11 @@ export class PineconeClient {
         this.indexReady = true;
     }
 
-    /** Returns the configured index handle, creating the index on first use. */
+    /**
+     * Returns the configured index handle, creating the index on first use.
+     *
+     * @returns A Pinecone index handle ready for upsert/query/delete
+     */
     static async getIndex(): Promise<Index> {
         await this.ensureIndex();
         return this.getClient().index({ name: this.indexName });

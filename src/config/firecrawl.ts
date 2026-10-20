@@ -9,10 +9,15 @@ import Firecrawl from "@mendable/firecrawl-js";
 import { env } from "./env.js";
 import { APIError } from "../shared/http/api-error.js";
 
+/** Lazily created singleton accessor for the Firecrawl SDK client. */
 export class FirecrawlClient {
     private static client: Firecrawl | null = null;
 
-    /** Whether website imports are available. */
+    /**
+     * Whether website imports are available.
+     *
+     * @returns `true` when `FIRECRAWL_API_KEY` is set
+     */
     static isConfigured() {
         return !!env.FIRECRAWL_API_KEY;
     }

@@ -15,6 +15,7 @@ const globalForPrisma = globalThis as unknown as {
     prisma: PrismaClient | undefined;
 };
 
+/** The shared Prisma client (reused from `globalThis` in development). */
 const prisma =
     globalForPrisma.prisma ??
     new PrismaClient({

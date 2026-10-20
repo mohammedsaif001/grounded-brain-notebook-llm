@@ -28,6 +28,8 @@ const openaiQueue = new PQueue({
 /**
  * Runs an OpenAI call through {@link openaiQueue}.
  *
+ * @param task - Function that performs the OpenAI request
+ * @returns The task's result once it has had its turn in the queue
  * @throws {APIError} TooManyRequests when the queue already holds `OPENAI_MAX_QUEUE` waiting calls
  */
 export function scheduleOpenAI<T>(task: () => PromiseLike<T>): Promise<T> {
@@ -47,9 +49,15 @@ const rateLimitMiddleware: LanguageModelMiddleware = {
     wrapStream: ({ doStream }) => scheduleOpenAI(doStream),
 };
 
+/** Un-throttled AI SDK provider; always wrapped by {@link openai} before use. */
 const provider = createOpenAI({ apiKey: env.OPENAI_API_KEY });
 
-/** AI SDK chat model for `modelId`, throttled through the shared OpenAI queue. */
+/**
+ * AI SDK chat model for `modelId`, throttled through the shared OpenAI queue.
+ *
+ * @param modelId - OpenAI model id, e.g. one of `CHAT_MODELS`
+ * @returns A language model usable with `generateText` / `streamText`
+ */
 export function openai(modelId: Parameters<typeof provider>[0]) {
     return wrapLanguageModel({
         model: provider(modelId),
@@ -60,7 +68,14 @@ export function openai(modelId: Parameters<typeof provider>[0]) {
 /** Raw OpenAI SDK client. Retries 429/5xx with exponential backoff (honours `retry-after`). */
 export const openaiClient = new OpenAI({ apiKey: env.OPENAI_API_KEY, maxRetries: 3 });
 
-/** Whether an error is OpenAI rejecting us for rate/quota limits (after SDK retries). */
+/**
+ * Whether an error is OpenAI rejecting us for rate/quota limits (after SDK retries).
+ *
+ * Unwraps AI SDK `RetryError`s so the underlying 429 is detected.
+ *
+ * @param error - Any thrown value
+ * @returns `true` for OpenAI rate-limit / HTTP 429 errors
+ */
 export function isOpenAIRateLimitError(error: unknown): boolean {
     if (error instanceof OpenAI.RateLimitError) {
         return true;

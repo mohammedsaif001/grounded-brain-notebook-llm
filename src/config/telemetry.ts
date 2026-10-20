@@ -21,6 +21,7 @@ const DEFAULT_LANGFUSE_BASE_URL = "https://cloud.langfuse.com";
 /** Max time to wait for pending spans to export on shutdown. */
 const SHUTDOWN_TIMEOUT_MS = 5_000;
 
+/** Active tracer provider; stays `null` while tracing is disabled. */
 let provider: NodeTracerProvider | null = null;
 
 /** Registers the tracer provider and AI SDK integration. Call once at startup. */

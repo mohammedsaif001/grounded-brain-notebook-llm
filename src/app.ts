@@ -22,6 +22,7 @@ import { apiRateLimiter } from "./shared/middleware/rate-limit.middleware.js";
 import { requestLogger } from "./shared/middleware/request-logger.middleware.js";
 import { requireAuth } from "./shared/middleware/require-auth.middleware.js";
 
+/** The configured Express app (middleware order below is significant). Does not listen on a port. */
 export const app = express();
 
 app.disable("x-powered-by");

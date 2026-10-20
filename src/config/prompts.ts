@@ -40,6 +40,7 @@ export const CHAT_NO_SOURCES_WITH_WEB_SEARCH =
 export const CHAT_NO_SOURCES_WITHOUT_WEB_SEARCH =
     "Answer helpfully from general knowledge, say that it is not from their sources, and suggest adding or processing sources when appropriate.";
 
+/** Closing guard appended to the chat prompt so the model never fabricates citation markers. */
 export const CHAT_NO_INVENTED_CITATIONS = "Do not invent citations.";
 
 /** Grounding and citation rules used when source chunks were retrieved. */
@@ -63,6 +64,7 @@ export const chatUserPrompt = (sourcesBlock: string, userText: string) =>
 // Retrieval: follow-up question rewriting
 // ---------------------------------------------------------------------------
 
+/** System prompt that turns a follow-up message into a standalone retrieval query. */
 export const QUERY_REWRITE_SYSTEM = [
     "You rewrite the user's latest message into a standalone search query for a document retrieval system.",
     "Resolve pronouns and references using the conversation. Keep the user's intent and key terms.",
@@ -70,6 +72,13 @@ export const QUERY_REWRITE_SYSTEM = [
     "Output only the query, with no quotes or explanation.",
 ].join("\n");
 
+/**
+ * User turn for query rewriting.
+ *
+ * @param transcript - Recent conversation messages, formatted as plain text
+ * @param userText - The user's latest message to rewrite
+ * @returns The prompt text sent to the model
+ */
 export const queryRewritePrompt = (transcript: string, userText: string) =>
     `Conversation:\n${transcript}\n\nLatest message: ${userText}`;
 
@@ -77,6 +86,7 @@ export const queryRewritePrompt = (transcript: string, userText: string) =>
 // Conversation memory: rolling summary
 // ---------------------------------------------------------------------------
 
+/** System prompt for the rolling conversation summary (third person, under 250 words). */
 export const CONVERSATION_SUMMARY_SYSTEM = [
     "You summarize chat conversations for a learning assistant.",
     "Produce a concise rolling summary covering topics discussed, questions asked,",
@@ -87,6 +97,7 @@ export const CONVERSATION_SUMMARY_SYSTEM = [
 /**
  * @param transcript - New messages (or the whole conversation when there is no summary yet)
  * @param previousSummary - Existing summary to merge into, if any
+ * @returns The prompt text sent to the model
  */
 export const conversationSummaryPrompt = (transcript: string, previousSummary?: string) =>
     [
@@ -105,7 +116,12 @@ export const conversationSummaryPrompt = (transcript: string, previousSummary?: 
 // Artifacts
 // ---------------------------------------------------------------------------
 
-/** @param targetWords - Approximate word budget for the condensed notes */
+/**
+ * System prompt for condensing an oversized source into study notes.
+ *
+ * @param targetWords - Approximate word budget for the condensed notes
+ * @returns The system prompt text
+ */
 export const condenseSourceSystem = (targetWords: number) =>
     [
         "You condense source material into dense study notes.",
@@ -114,6 +130,15 @@ export const condenseSourceSystem = (targetWords: number) =>
         `Keep the notes under about ${targetWords} words.`,
     ].join("\n");
 
+/**
+ * User turn for condensing one segment of a large source.
+ *
+ * @param title - Source title, shown so the model knows what it is reading
+ * @param part - 1-based index of this segment
+ * @param totalParts - Total number of segments the source was split into
+ * @param segment - The segment text to condense
+ * @returns The prompt text sent to the model
+ */
 export const condenseSourcePrompt = (
     title: string,
     part: number,
@@ -121,7 +146,12 @@ export const condenseSourcePrompt = (
     segment: string,
 ) => `Source: ${title} (part ${part} of ${totalParts})\n\n${segment}`;
 
-/** @param type - Artifact type name, e.g. `QUIZ` */
+/**
+ * System prompt for generating a learning artifact.
+ *
+ * @param type - Artifact type name, e.g. `QUIZ`
+ * @returns The system prompt text
+ */
 export const artifactSystem = (type: string) =>
     [
         `You are Grounded-Brain-Notebook, an expert learning assistant generating a ${type.toLowerCase()} from workspace source materials.`,

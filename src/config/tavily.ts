@@ -9,10 +9,15 @@ import { tavily } from "@tavily/core";
 import { env } from "./env.js";
 import { APIError } from "../shared/http/api-error.js";
 
+/** Lazily created singleton accessor for the Tavily SDK client. */
 export class TavilyClient {
     private static client: ReturnType<typeof tavily> | null = null;
 
-    /** Whether web search is available. */
+    /**
+     * Whether web search is available.
+     *
+     * @returns `true` when `TAVILY_API_KEY` is set
+     */
     static isConfigured() {
         return !!env.TAVILY_API_KEY;
     }

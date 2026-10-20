@@ -9,10 +9,15 @@ import { MemoryClient } from "mem0ai";
 import { env } from "./env.js";
 import { APIError } from "../shared/http/api-error.js";
 
+/** Lazily created singleton accessor for the Mem0 SDK client. */
 export class Mem0Client {
     private static client: MemoryClient | null = null;
 
-    /** Whether Mem0 is configured; memory features are skipped when it isn't. */
+    /**
+     * Whether Mem0 is configured; memory features are skipped when it isn't.
+     *
+     * @returns `true` when `MEM0_API_KEY` is set
+     */
     static isConfigured() {
         return !!env.MEM0_API_KEY;
     }

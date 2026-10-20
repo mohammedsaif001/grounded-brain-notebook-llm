@@ -12,15 +12,29 @@
 import "dotenv/config";
 import { z } from "zod";
 
-/** Treats empty or whitespace-only values (e.g. `FOO=` in .env) as unset. */
+/**
+ * Wraps a Zod schema so it is optional and treats empty or whitespace-only values
+ * (e.g. `FOO=` in .env) as unset.
+ *
+ * @param schema - Schema applied when the variable has a non-empty value
+ * @returns A schema that yields `undefined` for unset or blank variables
+ */
 const optional = <T extends z.ZodType>(schema: T) =>
     z.preprocess(
         (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
         schema.optional(),
     );
 
+/** Optional, trimmed string variable (blank is treated as unset). */
 const optionalString = optional(z.string().trim());
 
+/**
+ * Schema for every environment variable the server reads.
+ *
+ * Beyond per-field checks, `superRefine` enforces cross-field rules: paired credentials
+ * must be set together (Google, Cloudinary, Langfuse) and Inngest keys are mandatory in
+ * production unless Inngest dev mode is on.
+ */
 const envSchema = z
     .object({
         NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -68,6 +82,12 @@ const envSchema = z
         LANGFUSE_BASE_URL: optional(z.url()),
     })
     .superRefine((value, ctx) => {
+        /**
+         * Flags an issue on each unset key when only some of `keys` are set.
+         *
+         * @param keys - Variables that only make sense as a group
+         * @param reason - What the group enables, shown in the error message
+         */
         const requireTogether = (keys: (keyof typeof value)[], reason: string) => {
             const set = keys.filter((key) => value[key] !== undefined);
             if (set.length > 0 && set.length < keys.length) {
@@ -105,6 +125,7 @@ const envSchema = z
         }
     });
 
+/** Result of validating `process.env`; the process exits below if validation failed. */
 const parsed = envSchema.safeParse(process.env);
 
 if (!parsed.success) {
@@ -112,8 +133,10 @@ if (!parsed.success) {
     process.exit(1);
 }
 
+/** Typed, validated environment variables. Import this instead of reading `process.env`. */
 export const env = parsed.data;
 
+/** `true` when `NODE_ENV` is `production`; gates dev-only conveniences (e.g. email/password login). */
 export const isProduction = env.NODE_ENV === "production";
 
 /** `true`/`false` when `INNGEST_DEV` is set, otherwise `undefined` (Inngest decides). */
