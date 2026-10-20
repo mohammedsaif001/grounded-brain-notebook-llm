@@ -13,7 +13,7 @@ const conversationEventSchema = z.object({
     userId: z.string().min(1),
 });
 
-export const processSource = inngest.createFunction(
+const processSource = inngest.createFunction(
     {
         id: "process-source",
         retries: 3,
@@ -56,7 +56,7 @@ export const processSource = inngest.createFunction(
     },
 );
 
-export const generateArtifact = inngest.createFunction(
+const generateArtifact = inngest.createFunction(
     {
         id: "generate-artifact",
         retries: 2,
@@ -79,7 +79,7 @@ export const generateArtifact = inngest.createFunction(
     },
 );
 
-export const summarizeConversation = inngest.createFunction(
+const summarizeConversation = inngest.createFunction(
     {
         id: "summarize-conversation",
         retries: 2,

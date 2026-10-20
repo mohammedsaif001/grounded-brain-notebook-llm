@@ -20,7 +20,7 @@ export type SourceRecord = Prisma.SourceGetPayload<{
 }>;
 
 /** Same as {@link sourceSelect} minus `content`, which can be megabytes per source. */
-export const sourceSummarySelect = {
+const sourceSummarySelect = {
     id: true,
     workspaceId: true,
     type: true,

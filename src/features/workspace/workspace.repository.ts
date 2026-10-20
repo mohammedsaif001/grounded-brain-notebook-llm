@@ -1,7 +1,7 @@
 import prisma from "../../config/db.js";
 import type { CreateWorkspaceInput, UpdateWorkspaceInput } from "./workspace.validator.js";
 
-export const workspaceSelect = {
+const workspaceSelect = {
     id: true,
     title: true,
     description: true,

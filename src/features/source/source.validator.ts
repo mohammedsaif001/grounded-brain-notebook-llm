@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { workspaceIdParamSchema } from "../workspace/workspace.validator.js";
 
-export const sourceTypeSchema = z.enum(["PDF", "WEBSITE", "YOUTUBE", "TEXT", "MARKDOWN"]);
+const sourceTypeSchema = z.enum(["PDF", "WEBSITE", "YOUTUBE", "TEXT", "MARKDOWN"]);
 
-export const sourceStatusSchema = z.enum(["PENDING", "PROCESSING", "READY", "FAILED"]);
+const sourceStatusSchema = z.enum(["PENDING", "PROCESSING", "READY", "FAILED"]);
 
 export const sourceIdParamSchema = workspaceIdParamSchema.extend({
     sourceId: z.string().trim().min(1),
@@ -15,13 +15,13 @@ export const listSourcesQuerySchema = z.object({
     status: sourceStatusSchema.optional(),
 });
 
-export const createTextSourceSchema = z.object({
+const createTextSourceSchema = z.object({
     type: z.literal("TEXT"),
     title: z.string().trim().min(1, "Title is required").max(200),
     content: z.string().trim().min(1, "Content is required"),
 });
 
-export const createMarkdownSourceSchema = z.object({
+const createMarkdownSourceSchema = z.object({
     type: z.literal("MARKDOWN"),
     title: z.string().trim().min(1, "Title is required").max(200),
     content: z.string().trim().min(1, "Content is required"),

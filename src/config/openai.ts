@@ -19,7 +19,7 @@ import { APIError } from "../shared/http/api-error.js";
 import { env } from "./env.js";
 
 /** Shared queue for every outbound OpenAI request. */
-export const openaiQueue = new PQueue({
+const openaiQueue = new PQueue({
     concurrency: env.OPENAI_MAX_CONCURRENCY,
     intervalCap: env.OPENAI_REQUESTS_PER_MINUTE,
     interval: 60_000,

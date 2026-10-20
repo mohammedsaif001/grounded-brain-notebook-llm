@@ -1,7 +1,7 @@
 import type { Prisma } from "../../generated/prisma/client.js";
 import prisma from "../../config/db.js";
 
-export const messageSelect = {
+const messageSelect = {
     id: true,
     conversationId: true,
     role: true,

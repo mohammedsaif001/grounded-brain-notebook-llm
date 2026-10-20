@@ -1,14 +1,7 @@
 import { z } from "zod";
 import { workspaceIdParamSchema } from "../workspace/workspace.validator.js";
 
-export const artifactTypes = [
-    "SUMMARY",
-    "TAKEAWAYS",
-    "FLASHCARDS",
-    "QUIZ",
-    "MINDMAP",
-    "REPORT",
-] as const;
+const artifactTypes = ["SUMMARY", "TAKEAWAYS", "FLASHCARDS", "QUIZ", "MINDMAP", "REPORT"] as const;
 
 export const artifactIdParamSchema = workspaceIdParamSchema.extend({
     artifactId: z.string().trim().min(1, "Artifact id is required"),

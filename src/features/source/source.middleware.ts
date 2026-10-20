@@ -12,7 +12,7 @@ const PDF_MIME_TYPES = new Set(["application/pdf", "application/x-pdf"]);
  * both of which can be spoofed. The file's actual bytes are verified by `PdfValidator`
  * in the service before anything is stored.
  */
-export const pdfUpload = multer({
+const pdfUpload = multer({
     storage: multer.memoryStorage(),
     limits: {
         fileSize: MAX_PDF_SIZE_BYTES,
