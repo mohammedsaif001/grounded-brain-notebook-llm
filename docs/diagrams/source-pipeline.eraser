@@ -1,0 +1,53 @@
+// Grounded Brain: source ingestion and the process-source job
+// Eraser "Sequence Diagram" diagram-as-code. Paste into a new Sequence diagram at https://app.eraser.io
+title Source ingestion: create → extract → chunk → embed → index
+autoNumber on
+
+Client [icon: monitor, color: gray] > SourceService [icon: nodejs, color: green]: POST /sources | /upload | /import/website | /import/youtube
+
+alt [label: PDF upload] {
+  SourceService > SourceService: multer limits, PdfValidator.assertSafe (bytes, active content, pages)
+  SourceService > Cloudinary [icon: cloud, color: blue]: upload PDF
+  SourceService > SourceService: best-effort text extraction (unpdf)
+}
+else [label: website] {
+  SourceService > Firecrawl [icon: globe, color: orange]: scrape URL → markdown
+}
+else [label: YouTube] {
+  SourceService > YouTube [icon: youtube, color: red]: fetch transcript
+}
+
+SourceService > Postgres [icon: postgres, color: blue]: INSERT source (PENDING)
+SourceService > Inngest [icon: zap, color: purple]: send source/created {sourceId, workspaceId}
+SourceService --> Client: 201 source (PENDING)
+
+Inngest > ProcessSourceJob [icon: file-text, color: purple]: run (concurrency 1 per sourceId, 3 retries)
+activate ProcessSourceJob
+ProcessSourceJob > Postgres: step mark-processing → PROCESSING
+
+ProcessSourceJob > ProcessSourceJob: step extract-and-chunk
+alt [label: PDF with fileUrl] {
+  ProcessSourceJob > Cloudinary: download PDF (signed URL fallback on 401)
+  ProcessSourceJob > ProcessSourceJob: unpdf → text per page
+}
+else [label: text already stored] {
+  ProcessSourceJob > Postgres: read source.content
+}
+ProcessSourceJob > Postgres: save full text, delete old chunks
+ProcessSourceJob > ProcessSourceJob: LangChain RecursiveCharacterTextSplitter (1000 chars, 100 overlap, per PDF page)
+ProcessSourceJob > Postgres: INSERT source_chunk rows
+
+ProcessSourceJob > ProcessSourceJob: step embed-and-index
+loop [label: batches of 50 chunks] {
+  ProcessSourceJob > OpenAI [icon: openai, color: orange]: embeddings via shared queue
+}
+ProcessSourceJob > Pinecone [icon: database, color: blue]: delete old vectors, upsert new (namespace = workspaceId, id = chunk id)
+ProcessSourceJob > Postgres: READY + chunkCount + indexedAt
+
+opt [label: a step exhausts its retries] {
+  ProcessSourceJob > Postgres: step mark-failed → FAILED + metadata.processingError
+}
+deactivate ProcessSourceJob
+
+Client > SourceService: GET /sources/:id (poll)
+SourceService --> Client: READY

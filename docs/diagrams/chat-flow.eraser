@@ -1,0 +1,42 @@
+// Grounded Brain: RAG chat request
+// Eraser "Sequence Diagram" diagram-as-code. Paste into a new Sequence diagram at https://app.eraser.io
+title Chat: POST /api/workspaces/:workspaceId/chat
+autoNumber on
+
+Client [icon: monitor, color: gray] > ChatService [icon: nodejs, color: green]: POST /chat {conversationId?, messages, model?, webSearch?}
+activate ChatService
+ChatService > Postgres [icon: postgres, color: blue]: verify workspace ownership
+ChatService > Postgres: get or create conversation, save USER message
+ChatService > Postgres: load last 12 messages (history from DB, not client)
+ChatService > OpenAI [icon: openai, color: orange]: rewrite follow-up into standalone query (last 6 turns)
+OpenAI --> ChatService: standalone query
+
+par [label: retrieval and memories in parallel] {
+  ChatService > OpenAI: embed query (text-embedding-3-small)
+  ChatService > Pinecone [icon: database, color: blue]: top 6 chunks in workspace namespace (score >= 0.35)
+  Pinecone --> ChatService: chunks + metadata
+  ChatService > Mem0 [icon: brain, color: purple]: search user memories (top 5, score >= 0.3)
+  Mem0 --> ChatService: memories
+}
+
+ChatService > ChatService: system prompt (rules + memories + rolling summary), user prompt (<sources> + question)
+ChatService > OpenAI: streamText (optional web_search tool, max 3 steps)
+
+opt [label: model calls web_search] {
+  OpenAI --> ChatService: tool call {query}
+  ChatService > Tavily [icon: search, color: orange]: search (5 results)
+  Tavily --> ChatService: results
+  ChatService > OpenAI: results labelled [W1], [W2]...
+}
+
+OpenAI --> Client: tokens streamed (UI message stream, X-Conversation-Id header)
+
+ChatService > Postgres: onFinish: save ASSISTANT message + cited sources only
+ChatService > Postgres: touch conversation, set title if missing
+
+opt [label: 8+ messages since last summary] {
+  ChatService > Inngest [icon: zap, color: purple]: send conversation/summarize
+}
+deactivate ChatService
+
+ChatService --> Langfuse [icon: activity]: traces (userId, sessionId = conversationId)

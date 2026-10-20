@@ -1,0 +1,49 @@
+// Grounded Brain: Inngest events and background functions
+// Eraser "Flow Chart" diagram-as-code. Paste into a new Flow Chart diagram at https://app.eraser.io
+title Background jobs (Inngest)
+direction right
+colorMode bold
+
+// Publishers
+SourceService create or reprocess [shape: oval, icon: nodejs, color: green]
+SourceService delete [shape: oval, icon: nodejs, color: green]
+WorkspaceService delete [shape: oval, icon: nodejs, color: green]
+ArtifactService create [shape: oval, icon: nodejs, color: green]
+ChatService every 8 messages [shape: oval, icon: nodejs, color: green]
+
+// Events
+source/created [shape: parallelogram, icon: zap, color: purple]
+source/deleted [shape: parallelogram, icon: zap, color: purple]
+workspace/deleted [shape: parallelogram, icon: zap, color: purple]
+artifact/generate [shape: parallelogram, icon: zap, color: purple]
+conversation/summarize [shape: parallelogram, icon: zap, color: purple]
+
+// Functions
+process-source [icon: file-text, color: blue, label: "process-source\nmark-processing → extract-and-chunk → embed-and-index\n3 retries · 1 per sourceId"]
+generate-artifact [icon: book-open, color: blue, label: "generate-artifact\ngenerate\n2 retries"]
+summarize-conversation [icon: message-square, color: blue, label: "summarize-conversation\nsummarize + Mem0 learning\n2 retries · 1 per conversationId"]
+
+// Downstream
+Pinecone [icon: database]
+OpenAI [icon: openai]
+Postgres [icon: postgres]
+Mem0 [icon: brain]
+
+SourceService create or reprocess > source/created > process-source
+SourceService delete > source/deleted
+WorkspaceService delete > workspace/deleted
+ArtifactService create > artifact/generate > generate-artifact
+ChatService every 8 messages > conversation/summarize > summarize-conversation
+
+source/deleted --> process-source: cancels
+workspace/deleted --> process-source: cancels
+workspace/deleted --> generate-artifact: cancels
+
+process-source > OpenAI: embeddings
+process-source > Pinecone: vectors
+process-source > Postgres: chunks + status
+generate-artifact > OpenAI: structured generation
+generate-artifact > Postgres: content + status
+summarize-conversation > OpenAI: rolling summary
+summarize-conversation > Postgres: summary
+summarize-conversation > Mem0: learn memories

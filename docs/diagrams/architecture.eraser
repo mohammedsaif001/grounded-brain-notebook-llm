@@ -1,0 +1,70 @@
+// Grounded Brain: system architecture
+// Eraser "Cloud Architecture" diagram-as-code. Paste into a new Cloud Architecture diagram at https://app.eraser.io
+title Grounded Brain Notebook LLM: system architecture
+direction right
+colorMode bold
+styleMode shadow
+typeface clean
+
+// ----- Client -----
+Web Client [icon: monitor, color: gray, label: "Web client (AI SDK useChat)"]
+
+// ----- API -----
+Express API [icon: nodejs, color: green] {
+  Middleware [icon: shield, label: "pino-http · CORS · rate limits · Better Auth · Zod"]
+  Feature Routes [icon: git-branch, label: "workspaces · sources · chat · conversations · artifacts · memory · health"]
+  Services [icon: settings, label: "Services (business logic)"]
+  Repositories [icon: layers, label: "Repositories (Prisma · Pinecone · Mem0)"]
+  OpenAI Queue [icon: list, label: "Shared OpenAI queue (p-queue)"]
+  Inngest Endpoint [icon: zap, label: "/api/inngest (job functions)"]
+}
+
+// ----- Background jobs -----
+Inngest [icon: zap, color: purple] {
+  Event Bus [icon: radio, label: "Events: source/created · artifact/generate · conversation/summarize · source/deleted · workspace/deleted"]
+  process-source [icon: file-text]
+  generate-artifact [icon: book-open]
+  summarize-conversation [icon: message-square]
+}
+
+// ----- Data -----
+Data stores [color: blue] {
+  PostgreSQL [icon: postgres, label: "PostgreSQL 16 (Docker locally) via Prisma"]
+  Pinecone [icon: database, label: "Pinecone (vectors, namespace per workspace)"]
+  Mem0 [icon: brain, label: "Mem0 (user memories)"]
+  Cloudinary [icon: cloud, label: "Cloudinary (PDF files)"]
+}
+
+// ----- AI and external services -----
+AI and external [color: orange] {
+  OpenAI [icon: openai, label: "OpenAI: gpt-4o-mini / gpt-4o · text-embedding-3-small"]
+  Tavily [icon: search, label: "Tavily (web search tool)"]
+  Firecrawl [icon: globe, label: "Firecrawl (website → markdown)"]
+  YouTube [icon: youtube, label: "YouTube transcripts"]
+  Langfuse [icon: activity, label: "Langfuse (LLM tracing)"]
+}
+
+// ----- Connections -----
+Web Client > Middleware: HTTPS + session cookie
+Middleware > Feature Routes
+Feature Routes > Services
+Feature Routes > Web Client: streamed chat reply (SSE)
+Services > Repositories
+Repositories > PostgreSQL: Prisma
+Repositories > Pinecone: upsert / query vectors
+Repositories > Mem0: search / add memories
+Services > Cloudinary: upload PDF
+Services > OpenAI Queue: every LLM + embedding call
+OpenAI Queue > OpenAI
+Services > Tavily: web_search tool
+Services > Firecrawl: scrape website
+Services > YouTube: fetch transcript
+Services > Event Bus: send event
+Event Bus > Inngest Endpoint: invoke function (signed HTTP)
+Inngest Endpoint > process-source
+Inngest Endpoint > generate-artifact
+Inngest Endpoint > summarize-conversation
+process-source > Services
+generate-artifact > Services
+summarize-conversation > Services
+Services --> Langfuse: OpenTelemetry spans

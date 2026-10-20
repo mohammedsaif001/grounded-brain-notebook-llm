@@ -1,0 +1,130 @@
+// Grounded Brain: PostgreSQL schema
+// Eraser "Entity Relationship" diagram-as-code. Paste into a new ERD at https://app.eraser.io
+title Database schema (PostgreSQL via Prisma)
+colorMode bold
+notation crows-foot
+
+// ----- Better Auth -----
+user [icon: user, color: gray] {
+  id string pk
+  name string
+  email string unique
+  emailVerified boolean
+  image string
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+session [icon: key, color: gray] {
+  id string pk
+  userId string fk
+  token string unique
+  expiresAt timestamp
+  ipAddress string
+  userAgent string
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+account [icon: link, color: gray] {
+  id string pk
+  userId string fk
+  accountId string
+  providerId string
+  accessToken string
+  refreshToken string
+  idToken string
+  accessTokenExpiresAt timestamp
+  refreshTokenExpiresAt timestamp
+  scope string
+  password string
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+verification [icon: check-circle, color: gray] {
+  id string pk
+  identifier string
+  value string
+  expiresAt timestamp
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+// ----- Notebook -----
+workspace [icon: folder, color: green] {
+  id string pk
+  userId string fk
+  title string
+  description string
+  icon string
+  defaultModel string
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+source [icon: file-text, color: blue] {
+  id string pk
+  workspaceId string fk
+  type SourceType
+  title string
+  content text
+  url string
+  status SourceStatus
+  metadata json
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+source_chunk [icon: scissors, color: blue] {
+  id string pk "= Pinecone vector id"
+  sourceId string fk
+  index int
+  content text
+  tokenCount int
+  metadata json
+  createdAt timestamp
+}
+
+conversation [icon: message-square, color: purple] {
+  id string pk
+  workspaceId string fk
+  title string
+  summary text
+  summaryMessageCount int
+  summarizedAt timestamp
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+message [icon: message-circle, color: purple] {
+  id string pk
+  conversationId string fk
+  role MessageRole
+  content text
+  citations json
+  createdAt timestamp
+}
+
+learning_artifact [icon: book-open, color: orange] {
+  id string pk
+  workspaceId string fk
+  type ArtifactType
+  title string
+  content json
+  sourceIds string[] "soft reference, no FK"
+  status ArtifactStatus
+  metadata json
+  createdAt timestamp
+  updatedAt timestamp
+}
+
+// ----- Relationships (all ON DELETE CASCADE) -----
+session.userId > user.id
+account.userId > user.id
+workspace.userId > user.id
+source.workspaceId > workspace.id
+source_chunk.sourceId > source.id
+conversation.workspaceId > workspace.id
+message.conversationId > conversation.id
+learning_artifact.workspaceId > workspace.id
