@@ -5,6 +5,7 @@
 import { generateText } from "ai";
 import { CHAT_MODEL, RAG_MIN_SCORE, RAG_TOP_K } from "../../config/ai.config.js";
 import { openai } from "../../config/openai.js";
+import { QUERY_REWRITE_SYSTEM, queryRewritePrompt } from "../../config/prompts.js";
 import { EmbeddingClient } from "../../shared/ai/embeddings.js";
 import { VectorRepository } from "../../shared/ai/vector.repository.js";
 import type { ConversationTurn } from "../conversation/conversation.types.js";
@@ -34,13 +35,8 @@ export class RetrievalService {
         try {
             const { text } = await generateText({
                 model: openai(CHAT_MODEL),
-                system: [
-                    "You rewrite the user's latest message into a standalone search query for a document retrieval system.",
-                    "Resolve pronouns and references using the conversation. Keep the user's intent and key terms.",
-                    "If the message is already standalone, return it unchanged.",
-                    "Output only the query, with no quotes or explanation.",
-                ].join("\n"),
-                prompt: `Conversation:\n${transcript}\n\nLatest message: ${userText}`,
+                system: QUERY_REWRITE_SYSTEM,
+                prompt: queryRewritePrompt(transcript, userText),
                 maxOutputTokens: 120,
             });
 

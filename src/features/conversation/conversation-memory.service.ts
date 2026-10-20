@@ -1,6 +1,7 @@
 import { generateText } from "ai";
 import { CHAT_MODEL } from "../../config/ai.config.js";
 import { openai } from "../../config/openai.js";
+import { CONVERSATION_SUMMARY_SYSTEM, conversationSummaryPrompt } from "../../config/prompts.js";
 import { ConversationRepository } from "./conversation.repository.js";
 import { MessageRepository } from "./message.repository.js";
 import { MemoryService } from "../memory/memory.service.js";
@@ -43,25 +44,8 @@ export class ConversationMemoryService {
 
         const { text: summary } = await generateText({
             model: openai(CHAT_MODEL),
-            system: [
-                "You summarize chat conversations for a learning assistant.",
-                "Produce a concise rolling summary covering topics discussed, questions asked,",
-                "key insights, and unresolved threads.",
-                "Write in third person about the user. Keep it under 250 words.",
-            ].join("\n"),
-            prompt: [
-                previousSummary ? `Previous summary:\n${previousSummary}\n` : null,
-                previousSummary
-                    ? "New messages since the previous summary:"
-                    : "Conversation transcript:",
-                transcript,
-                "",
-                previousSummary
-                    ? "Write an updated summary that merges the previous summary with the new messages."
-                    : "Write a summary of the conversation.",
-            ]
-                .filter(Boolean)
-                .join("\n"),
+            system: CONVERSATION_SUMMARY_SYSTEM,
+            prompt: conversationSummaryPrompt(transcript, previousSummary),
         });
 
         const updated = await ConversationRepository.updateSummary(conversationId, {
