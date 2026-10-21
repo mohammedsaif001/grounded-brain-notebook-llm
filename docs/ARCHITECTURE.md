@@ -12,6 +12,7 @@ Related docs: [Database](DATABASE.md) · [API guide](API.md) · [Smoke test](SMO
 
 1. [Mental model](#1-mental-model)
 2. [System architecture](#2-system-architecture)
+    - [2.1 GenAI Core Architecture: OpenAI · Mem0 · Vector Database (Qdrant & Pinecone)](#21-genai-core-architecture-openai--mem0--vector-database-qdrant--pinecone)
 3. [Every tool, and why it is here](#3-every-tool-and-why-it-is-here)
 4. [Project structure](#4-project-structure)
 5. [Layered design: routes → controllers → services → repositories](#5-layered-design)
@@ -137,6 +138,161 @@ flowchart LR
 - Every **OpenAI** call (chat, generation, query rewriting, embeddings) goes through one shared
   queue so the app never exceeds its OpenAI rate limits.
 - **Langfuse** receives traces of every AI SDK call (prompts, outputs, tokens, latency).
+
+---
+
+### 2.1 GenAI Core Architecture: OpenAI · Mem0 · Vector Database (Qdrant & Pinecone)
+
+This project is at its heart a **grounded generative AI platform**. Below is the dedicated architecture diagram mapping out the **GenAI Core**—illustrating precisely where and how **OpenAI**, **Mem0**, and the **Vector Database (Qdrant / Pinecone)** interact across every user action and background job.
+
+```mermaid
+flowchart TB
+    %% Styling and layout
+    classDef client fill:#f8fafc,stroke:#64748b,stroke-width:2px,color:#0f172a
+    classDef api fill:#f0fdf4,stroke:#16a34a,stroke-width:2px,color:#14532d
+    classDef jobs fill:#faf5ff,stroke:#9333ea,stroke-width:2px,color:#581c87
+    classDef openai fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12
+    classDef mem0 fill:#fdf2f8,stroke:#db2777,stroke-width:2px,color:#831843
+    classDef vectordb fill:#eff6ff,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+    classDef store fill:#f1f5f9,stroke:#475569,stroke-width:2px,color:#0f172a
+
+    subgraph CLIENT["💻 Client Layer"]
+        User["👤 Web Client (AI SDK useChat)<br/><i>Streaming SSE · Token-by-Token UI</i>"]
+    end
+
+    subgraph API["⚡ Express API & Orchestration Layer"]
+        ChatSvc["💬 ChatService<br/><i>Prompt Assembly · Citation Enforcement</i>"]
+        RetSvc["🔍 RetrievalService<br/><i>Standalone Query Generation · Vector Search</i>"]
+        MemSvc["🧠 MemoryService<br/><i>Personalization & Memory Filtering</i>"]
+        Queue["⏱️ Shared OpenAI Queue (p-queue)<br/><i>Concurrency: 4 · RPM: 300 · Max Queue: 100</i>"]
+    end
+
+    subgraph INNGEST["⚙️ Background Processing (Inngest Durable Jobs)"]
+        SourceJob["📄 process-source<br/><i>Extract text · Split (LangChain) · Embed chunks</i>"]
+        SummaryJob["📝 summarize-conversation<br/><i>Rolling summary & Mem0 sync (every 8 msgs)</i>"]
+        ArtifactJob["📚 generate-artifact<br/><i>Flashcards · Quiz · Summary · Mind Map · Report</i>"]
+    end
+
+    subgraph GENAI_CORE["🧠 GenAI Core: OpenAI · Mem0 · Vector Database Engine"]
+        subgraph OPENAI["🤖 OpenAI Intelligence & Embedding Engine"]
+            direction TB
+            OAI_Embed["🔤 text-embedding-3-small<br/><i>1536-dimensional dense vectors</i>"]
+            OAI_Chat["💬 gpt-4o-mini / gpt-4o<br/><i>Streaming Grounded RAG Generation</i>"]
+            OAI_Rewrite["🔄 gpt-4o-mini<br/><i>Contextual Query Disambiguation</i>"]
+            OAI_Artifact["📊 gpt-4o-mini + Zod Schemas<br/><i>Structured Outputs (Output.object)</i>"]
+            OAI_Summary["📝 gpt-4o-mini<br/><i>Rolling Chat Window Condensation</i>"]
+        end
+
+        subgraph VECTOR_ENGINE["🎯 Vector Database Engine (Qdrant / Pinecone)"]
+            direction TB
+            VEC_Index["🗂️ High-Dimensional Vector Index<br/><i>HNSW Graphs · Cosine Distance Metric</i>"]
+            VEC_Search["🔎 Approximate Nearest Neighbor (ANN) Search<br/><i>Top-K Retrieval (Default K=8, Threshold=0.3)</i>"]
+            VEC_Meta["🏷️ Payload Metadata Storage<br/><i>workspaceId · sourceId · chunkId · page · text</i>"]
+            VEC_Index --- VEC_Search --- VEC_Meta
+        end
+
+        subgraph MEM0["🧠 Mem0 Continuous Memory Layer"]
+            direction TB
+            M0_Learn["🧩 Autonomous Fact Extraction<br/><i>Extracts user facts & resolves conflicts</i>"]
+            M0_Search["🔍 Semantic Memory Recall<br/><i>Threshold: score ≥ 0.3 · Top-5 user memories</i>"]
+            M0_Store["💾 Long-Term Memory Profile Store<br/><i>Cross-workspace durable user intelligence</i>"]
+            M0_Learn --- M0_Search --- M0_Store
+        end
+    end
+
+    subgraph STORAGE["🗄️ Relational Source of Truth"]
+        Postgres[("🐘 PostgreSQL 16 (via Prisma ORM)<br/><i>Users · Workspaces · Sources · Chunks · Chats · Artifacts</i>")]
+    end
+
+    %% Flow 1: Ingestion Pipeline
+    User -. "1. Ingest PDF / URL / YouTube / Note" .-> API
+    API -->|"Trigger source/created"| SourceJob
+    SourceJob -->|"Split chunks (~1000 chars)"| OAI_Embed
+    OAI_Embed -->|"1536d vectors via p-queue"| Queue
+    Queue -->|"Upsert vectors + payload"| VEC_Index
+    SourceJob -->|"Store text & tiktoken count"| Postgres
+
+    %% Flow 2: Grounded RAG Chat
+    User ==>|"2. Ask question (chat)"| ChatSvc
+    ChatSvc -->|"Raw query + recent turns"| RetSvc
+    RetSvc -->|"Disambiguate query"| OAI_Rewrite
+    RetSvc -->|"Embed search query"| OAI_Embed
+    RetSvc ==>|"Query vector (scoped to workspaceId)"| VEC_Search
+    VEC_Search ==>|"Top-K grounded chunks with pages"| RetSvc
+    ChatSvc ==>|"Recall relevant user facts"| M0_Search
+    M0_Search ==>|"User preferences & facts"| ChatSvc
+    RetSvc -->|"Assembled & escaped context"| ChatSvc
+    ChatSvc ==>|"Grounded prompt: sources + memories"| OAI_Chat
+    OAI_Chat ==>|"Streamed answer + citations [1]"| User
+
+    %% Flow 3: Memory Extraction & Summarization
+    ChatSvc -.->|"Trigger every 8 chat messages"| SummaryJob
+    SummaryJob -->|"Prior summary + new messages"| OAI_Summary
+    OAI_Summary -->|"UPDATE conversation.summary"| Postgres
+    SummaryJob ==>|"Learn facts from new messages"| M0_Learn
+    M0_Learn ==>|"Upsert updated user memory"| M0_Store
+
+    %% Flow 4: Structured Learning Artifacts
+    User -. "3. Request study artifact" .-> API
+    API -->|"Trigger artifact/generate"| ArtifactJob
+    ArtifactJob -->|"Fetch source chunks"| Postgres
+    ArtifactJob ==>|"Structured generation"| OAI_Artifact
+    OAI_Artifact -->|"Store validated JSON payload"| Postgres
+    Postgres -.->|"View Quiz / Flashcards / Mind Map"| User
+
+    class User client
+    class ChatSvc,RetSvc,MemSvc,Queue api
+    class SourceJob,SummaryJob,ArtifactJob jobs
+    class OAI_Embed,OAI_Chat,OAI_Rewrite,OAI_Artifact,OAI_Summary openai
+    class M0_Learn,M0_Search,M0_Store mem0
+    class VEC_Index,VEC_Search,VEC_Meta vectordb
+    class Postgres store
+```
+
+<details>
+<summary>Diagram not rendering (e.g. in the GitHub mobile app)? View it as an image</summary>
+
+![GenAI Core Architecture](images/gen-ai-core-architecture.png)
+
+</details>
+
+> An icon version (OpenAI, Mem0, Qdrant/Pinecone, Inngest, Express, PostgreSQL) is available in
+> [`diagrams/genai-core-architecture.eraser`](diagrams/genai-core-architecture.eraser). See [diagrams/README.md](diagrams/README.md) for rendering details.
+
+#### The 3 Core Pillars of the GenAI Layer
+
+| Pillar                           | Technology                                                     | Role in Grounded Brain                                                                                                                                                                                                                                                             | Key Parameters & Gotchas                                                                                                                                                                                                                                                                                                                 |
+| :------------------------------- | :------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **🤖 Intelligence & Embeddings** | **OpenAI** (`gpt-4o-mini`, `gpt-4o`, `text-embedding-3-small`) | Powers **RAG chat streaming** (SSE), **contextual query rewriting**, **rolling conversation summarization**, **structured artifact generation** (Zod schemas), and **1536-dim chunk vectorization**.                                                                               | All calls pass through a centralized `p-queue` (max 4 concurrent, 300 RPM, max queue 100) to protect against rate limits. Untrusted source text is placed strictly in user turns inside delimited `<sources>` blocks, never in system instructions.                                                                                      |
+| **🧠 Long-Term Memory**          | **Mem0** (`mem0ai` SDK)                                        | Acts as the **cognitive memory layer** for personalized AI. Unlike raw vector storage, Mem0 extracts distilled atomic facts from chat turns, automatically resolves contradictions (e.g. updating stale user facts), and maintains an adaptive user profile across all workspaces. | Extracted asynchronously during rolling summarization runs (`infer: true`). Injected into chat system prompts when semantic relevance score `≥ 0.3` (up to top 5 memories). Fails gracefully if `MEM0_API_KEY` is not configured.                                                                                                        |
+| **🎯 Vector Database**           | **Vector Engine: Qdrant & Pinecone**                           | Stores 1536-dimensional chunk vectors with rich metadata payloads (`workspaceId`, `sourceId`, `chunkId`, `page`, `sourceTitle`, `text`). Performs **Approximate Nearest Neighbor (ANN)** cosine similarity search for RAG grounding.                                               | **Namespace / Payload Filtering**: Search is strictly scoped by `workspaceId` so queries never bleed across notebooks. Pinecone is integrated serverless in the codebase; Qdrant provides high-speed HNSW indexing and native JSON payload filtering (ideal for self-hosted or cloud deployments and as Mem0's underlying vector store). |
+
+#### The 4 Core GenAI Execution Loops
+
+1. **Source Ingestion & Vectorization Loop**:
+    - Documents (PDFs, URLs, YouTube videos, markdown notes) are parsed into text.
+    - Text is split into ~1,000-character segments (~200 char overlap) using LangChain's `RecursiveCharacterTextSplitter`.
+    - Each chunk is embedded via OpenAI's `text-embedding-3-small` (1536 dimensions) via `scheduleOpenAI`.
+    - Vectors and their metadata payloads (`workspaceId`, `sourceId`, `chunkId`, `chunkIndex`, `page`, `text`) are upserted into the Vector Database (Pinecone / Qdrant), while raw chunks and token counts are stored in PostgreSQL.
+
+2. **Grounded RAG Retrieval & Streaming Generation Loop**:
+    - The user asks a question in a workspace conversation.
+    - `RetrievalService` calls OpenAI (`gpt-4o-mini`) to rewrite follow-up questions into standalone queries based on chat history.
+    - The standalone query is embedded and sent to the Vector Database to fetch the Top-K most similar chunks (filtered strictly by `workspaceId`).
+    - Simultaneously, `MemoryService` queries Mem0 for the user's top personalized facts (filtered by score `≥ 0.3`).
+    - `ChatService` constructs a prompt with escaped `<sources>` and `<memories>` blocks.
+    - OpenAI (`gpt-4o-mini` or `gpt-4o`) streams the answer back to the client using Vercel AI SDK (`streamText`) with mandatory citations (`[1]` for document page references, `[W1]` for optional Tavily web search).
+
+3. **Continuous Agent Memory Learning & Summarization Loop**:
+    - Every 8 chat messages, Inngest triggers the `summarize-conversation` background job.
+    - OpenAI (`gpt-4o-mini`) condenses the previous summary plus only the new message turns into an updated rolling summary, keeping long conversations fast and affordable.
+    - Concurrently, the new messages are dispatched to Mem0 with `infer: true`. Mem0's LLM extracts durable user facts, updates conflicting preferences, and writes them to the user's long-term memory store.
+
+4. **Structured Learning Artifact Synthesis Loop**:
+    - When a user requests a Summary, Flashcards, Quiz, Mind Map, or Deep-Dive Report, Inngest runs `generate-artifact`.
+    - Chunks from the selected sources are loaded from PostgreSQL (or condensed if exceeding token limits).
+    - OpenAI (`gpt-4o-mini`) is invoked with Vercel AI SDK's `generateText` and `Output.object({ schema })`.
+    - The resulting payload is validated against strict Zod schemas and saved to PostgreSQL as typed JSON ready for UI rendering.
 
 ---
 
@@ -810,6 +966,8 @@ flowchart LR
 ---
 
 ## 10. The AI layer
+
+> For the comprehensive visual diagram and execution loop walkthrough covering **OpenAI**, **Mem0**, and the **Vector Database (Qdrant / Pinecone)**, see [Section 2.1: GenAI Core Architecture](#21-genai-core-architecture-openai--mem0--vector-database-qdrant--pinecone).
 
 ### Where OpenAI is called
 

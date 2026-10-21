@@ -1,0 +1,103 @@
+// Grounded Brain: GenAI Core Architecture (OpenAI · Mem0 · Vector Database)
+// Eraser "Cloud Architecture" diagram-as-code. Paste into a new Cloud Architecture diagram at https://app.eraser.io
+title Grounded Brain Notebook LLM: GenAI Core Architecture
+direction right
+colorMode bold
+styleMode shadow
+typeface clean
+
+// ----- Client Layer -----
+Client Layer [color: gray] {
+  User Client [icon: monitor, label: "Web Client (AI SDK useChat / SSE Stream)"]
+}
+
+// ----- Application & Orchestration Layer -----
+Application Orchestration [color: green] {
+  Express API [icon: nodejs, label: "Express 5 API (TypeScript)"]
+  Chat Service [icon: message-square, label: "ChatService (Prompt Assembly & Citations)"]
+  Retrieval Service [icon: search, label: "RetrievalService (Query Rewriter & Top-K)"]
+  Memory Service [icon: brain, label: "MemoryService (Personalization & Context)"]
+  OpenAI Queue [icon: list, label: "Shared p-queue (4 Concurrent, 300 RPM)"]
+}
+
+// ----- Background Processing Layer -----
+Background Jobs [icon: zap, color: purple] {
+  Inngest Bus [icon: radio, label: "Inngest Event Bus"]
+  Source Ingestion [icon: file-text, label: "process-source (LangChain Splitter)"]
+  Conversation Memory [icon: refresh-cw, label: "summarize-conversation (Every 8 msgs)"]
+  Artifact Synthesizer [icon: book-open, label: "generate-artifact (Zod Validation)"]
+}
+
+// ----- Core GenAI Layer: OpenAI -----
+OpenAI Engine [icon: openai, color: orange] {
+  Embedding Model [icon: layers, label: "text-embedding-3-small (1536d Vectors)"]
+  Chat Generator [icon: cpu, label: "gpt-4o-mini / gpt-4o (Streaming RAG with Citations)"]
+  Query Rewriter [icon: edit, label: "gpt-4o-mini (Contextual Standalone Query)"]
+  Artifact Generator [icon: code, label: "gpt-4o-mini (Structured Outputs / Output.object)"]
+  Rolling Summarizer [icon: file, label: "gpt-4o-mini (Condensed Chat History)"]
+}
+
+// ----- Core GenAI Layer: Vector Database Engine -----
+Vector Database Engine [icon: database, color: blue] {
+  Vector Index [icon: server, label: "Vector Index (HNSW Graphs · Cosine Distance)"]
+  Payload Filtering [icon: filter, label: "Payload Filter (workspaceId Namespace Isolation)"]
+  Top-K Semantic Search [icon: target, label: "Top-K Retrieval (Cosine Similarity)"]
+  Storage Engines [icon: database, label: "Engine: Qdrant / Pinecone (Serverless / Self-hosted)"]
+}
+
+// ----- Core GenAI Layer: Mem0 Long-Term Memory -----
+Mem0 Memory Layer [icon: brain, color: red] {
+  Fact Extractor [icon: zap, label: "Fact Extraction Engine (Autonomous LLM Inference)"]
+  Conflict Resolver [icon: check-circle, label: "Conflict Resolution (Preference Updates)"]
+  Memory Recall [icon: search, label: "Semantic Search (Score >= 0.3, Top-5 User Facts)"]
+  Memory Graph Store [icon: folder, label: "User Long-Term Profile (Cross-Workspace)"]
+}
+
+// ----- Data Persistence -----
+Persistence [color: blue] {
+  PostgreSQL [icon: postgres, label: "PostgreSQL 16 via Prisma (Chunks, Sources, Chats, Artifacts)"]
+}
+
+// ----- Data Flows & Interconnections -----
+User Client > Express API: 1. Question / Upload / Artifact Request
+Express API > Chat Service
+Chat Service > Retrieval Service: Resolve Context
+Retrieval Service > OpenAI Queue: Rewrite & Embed
+OpenAI Queue > Query Rewriter: Standalone Search Query
+OpenAI Queue > Embedding Model: Embed Search Query (1536d)
+Retrieval Service > Top-K Semantic Search: Query Vector + workspaceId
+Top-K Semantic Search > Vector Index
+Vector Index > Retrieval Service: Top-K Grounded Chunks with Metadata
+Chat Service > Memory Recall: Get User Facts
+Memory Recall > Memory Graph Store: Query by user_id
+Memory Graph Store > Chat Service: Personalized Memories
+Chat Service > OpenAI Queue: System Prompt (<sources> + <memories>)
+OpenAI Queue > Chat Generator: Stream Grounded Answer
+Chat Generator > User Client: SSE Token Stream with Citations [1]
+
+// Ingestion Pipeline Flow
+Express API > Inngest Bus: source/created event
+Inngest Bus > Source Ingestion
+Source Ingestion > OpenAI Queue: Embed Chunks
+OpenAI Queue > Embedding Model: 1536d Vectors
+Source Ingestion > Vector Index: Upsert Vectors + Chunk Payload
+Source Ingestion > PostgreSQL: Store Text Chunks & Tokens
+
+// Memory Learning & Summarization Flow
+Chat Service > Inngest Bus: conversation/summarize event
+Inngest Bus > Conversation Memory
+Conversation Memory > OpenAI Queue: Summarize Chat Turns
+OpenAI Queue > Rolling Summarizer: Rolling Summary
+Rolling Summarizer > PostgreSQL: Update conversation.summary
+Conversation Memory > Fact Extractor: Extract Facts (infer: true)
+Fact Extractor > Conflict Resolver: Deduplicate & Update
+Conflict Resolver > Memory Graph Store: Save User Facts
+
+// Artifact Generation Flow
+Express API > Inngest Bus: artifact/generate event
+Inngest Bus > Artifact Synthesizer
+Artifact Synthesizer > PostgreSQL: Fetch Source Chunks
+Artifact Synthesizer > OpenAI Queue: Structured Prompt + Zod
+OpenAI Queue > Artifact Generator: Generate JSON Object
+Artifact Generator > PostgreSQL: Save Validated Artifact
+PostgreSQL > User Client: Render Flashcards / Quiz / Mind Map
