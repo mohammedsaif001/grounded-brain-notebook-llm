@@ -13,7 +13,7 @@ Every diagram in the docs exists in two forms:
 | ------------------------------------------------------------------ | ------------------- | ------------------------------ | --------------------------------------------------- |
 | [`how-it-works.eraser`](how-it-works.eraser)                       | Flow Chart          | `how-it-works.png`             | README → How it works                               |
 | [`architecture.eraser`](architecture.eraser)                       | Cloud Architecture  | `architecture.png`             | README → Architecture; ARCHITECTURE §2              |
-| [`genai-core-architecture.eraser`](genai-core-architecture.eraser) | Cloud Architecture  | `gen-ai-core-architecture.png` | README → GenAI Core Architecture; ARCHITECTURE §2.1 |
+| [`genai-core-architecture.eraser`](genai-core-architecture.eraser) | Flow Chart          | `gen-ai-core-architecture.png` | README → GenAI Core Architecture; ARCHITECTURE §2.1 |
 | [`layered-design.eraser`](layered-design.eraser)                   | Flow Chart          | `layered-design.png`           | ARCHITECTURE §5                                     |
 | [`request-lifecycle.eraser`](request-lifecycle.eraser)             | Flow Chart          | `request-lifecycle.png`        | ARCHITECTURE §6                                     |
 | [`auth-flow.eraser`](auth-flow.eraser)                             | Sequence            | `auth-flow.png`                | ARCHITECTURE §7                                     |

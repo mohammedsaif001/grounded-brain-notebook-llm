@@ -153,107 +153,56 @@ flowchart LR
 Grounded Brain is fundamentally a **knowledge-grounded Generative AI platform**. The diagram below details the **AI core**—how **OpenAI**, **Mem0**, and the **Vector Database (Qdrant / Pinecone)** drive each step of the cognitive loop:
 
 ```mermaid
-flowchart TB
-    %% Styling and layout
+flowchart LR
+    %% Styling
     classDef client fill:#f8fafc,stroke:#64748b,stroke-width:2px,color:#0f172a
     classDef api fill:#f0fdf4,stroke:#16a34a,stroke-width:2px,color:#14532d
     classDef jobs fill:#faf5ff,stroke:#9333ea,stroke-width:2px,color:#581c87
-    classDef openai fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12
-    classDef mem0 fill:#fdf2f8,stroke:#db2777,stroke-width:2px,color:#831843
-    classDef vectordb fill:#eff6ff,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
-    classDef store fill:#f1f5f9,stroke:#475569,stroke-width:2px,color:#0f172a
+    classDef vectordb fill:#eff6ff,stroke:#2563eb,stroke-width:3px,color:#1e3a8a
+    classDef mem0 fill:#fdf2f8,stroke:#db2777,stroke-width:3px,color:#831843
+    classDef openai fill:#fff7ed,stroke:#ea580c,stroke-width:3px,color:#7c2d12
+    classDef out fill:#ecfdf5,stroke:#059669,stroke-width:2px,color:#065f46
 
-    subgraph CLIENT["💻 Client Layer"]
-        User["👤 Web Client (AI SDK useChat)<br/><i>Streaming SSE · Token-by-Token UI</i>"]
+    subgraph STAGE1["1. Client Input"]
+        User(["👤 User / Client<br/><i>Uploads docs · Asks questions</i>"]):::client
     end
 
-    subgraph API["⚡ Express API & Orchestration"]
-        ChatSvc["💬 ChatService<br/><i>Prompt Assembly · Citations</i>"]
-        RetSvc["🔍 RetrievalService<br/><i>Query Rewriter · Top-K</i>"]
-        MemSvc["🧠 MemoryService<br/><i>User Profiles & Recall</i>"]
-        Queue["⏱️ OpenAI Queue (p-queue)<br/><i>4 Concurrent · 300 RPM</i>"]
+    subgraph STAGE2["2. Orchestration"]
+        direction TB
+        API["⚡ Express API<br/><b>Orchestrator</b><br/><i>Prompt assembly & routing</i>"]:::api
+        Ingest["⚙️ Inngest Workers<br/><b>Background Jobs</b><br/><i>Chunking & sync</i>"]:::jobs
     end
 
-    subgraph INNGEST["⚙️ Background Jobs (Inngest)"]
-        SourceJob["📄 process-source<br/><i>Extract · LangChain Chunker · Embed</i>"]
-        SummaryJob["📝 summarize-conversation<br/><i>Rolling summary & Mem0 sync (every 8 msgs)</i>"]
-        ArtifactJob["📚 generate-artifact<br/><i>Flashcards · Quiz · Summary · Mind Map</i>"]
+    subgraph STAGE3["3. Context & Memory"]
+        direction TB
+        VDB[("🎯 <b>Pinecone / Qdrant</b><br/><i>Vector Database</i><br/><b>WHY:</b> Top-K chunk search<br/>Workspace-scoped retrieval")]:::vectordb
+        M0[("🧠 <b>Mem0</b><br/><i>Long-Term Memory</i><br/><b>WHY:</b> Learns user preferences<br/>Durable facts across chats")]:::mem0
     end
 
-    subgraph GENAI_CORE["🧠 GenAI Core: OpenAI · Mem0 · Vector Engine"]
-        subgraph OPENAI["🤖 OpenAI Intelligence & Embeddings"]
-            direction TB
-            OAI_Embed["🔤 text-embedding-3-small<br/><i>1536-dimensional vectors</i>"]
-            OAI_Chat["💬 gpt-4o-mini / gpt-4o<br/><i>Streaming Grounded RAG with Citations</i>"]
-            OAI_Rewrite["🔄 gpt-4o-mini<br/><i>Contextual Query Rewriting</i>"]
-            OAI_Artifact["📊 gpt-4o-mini + Zod<br/><i>Structured Output (Output.object)</i>"]
-            OAI_Summary["📝 gpt-4o-mini<br/><i>Rolling Conversation Summaries</i>"]
-        end
-
-        subgraph VECTOR_ENGINE["🎯 Vector Database (Qdrant / Pinecone)"]
-            direction TB
-            VEC_Index["🗂️ Vector Index<br/><i>HNSW Graphs · Cosine Distance</i>"]
-            VEC_Search["🔎 Semantic Top-K Retrieval<br/><i>Workspace Namespace / Payload Filter</i>"]
-            VEC_Meta["🏷️ Payload Metadata<br/><i>workspaceId · sourceId · chunkId · page · text</i>"]
-            VEC_Index --- VEC_Search --- VEC_Meta
-        end
-
-        subgraph MEM0["🧠 Mem0 Continuous Memory Layer"]
-            direction TB
-            M0_Learn["🧩 Fact Extraction Engine<br/><i>Extracts user facts & resolves conflicts</i>"]
-            M0_Search["🔍 Semantic Memory Recall<br/><i>Score ≥ 0.3 · Top-5 user facts</i>"]
-            M0_Store["💾 Long-Term Memory Store<br/><i>Persistent cross-workspace memory</i>"]
-            M0_Learn --- M0_Search --- M0_Store
-        end
+    subgraph STAGE4["4. Generative AI"]
+        OAI["🤖 <b>OpenAI Engine</b><br/><i>LLM & Embeddings</i><br/><b>WHY:</b><br/>• text-embedding-3-small (1536d)<br/>• gpt-4o-mini (Grounded Chat & Artifacts)"]:::openai
     end
 
-    subgraph STORAGE["🗄️ Relational Store"]
-        Postgres[("🐘 PostgreSQL (via Prisma ORM)<br/><i>Users · Workspaces · Sources · Chunks · Chats</i>")]
+    subgraph STAGE5["5. Output"]
+        Reply(["💬 <b>Streamed Reply</b><br/><i>Grounded answer with citations [1]</i>"]):::out
     end
 
-    %% Ingestion Flow
-    User -. "1. Ingest PDF / URL / Video" .-> API
-    API -->|"Enqueues job"| SourceJob
-    SourceJob -->|"Split chunks (~1000 chars)"| OAI_Embed
-    OAI_Embed -->|"1536d vectors via p-queue"| Queue
-    Queue -->|"Upsert vectors + payload"| VEC_Index
-    SourceJob -->|"Store text & token count"| Postgres
+    %% Ingestion Flow (Top)
+    User -->|"Upload docs"| Ingest
+    Ingest -->|"Embed chunks"| OAI
+    Ingest -->|"Index vectors & metadata"| VDB
 
-    %% RAG Chat Flow
-    User ==>|"2. Ask question (chat)"| ChatSvc
-    ChatSvc -->|"Raw query + chat turns"| RetSvc
-    RetSvc -->|"Disambiguate query"| OAI_Rewrite
-    RetSvc -->|"Embed search query"| OAI_Embed
-    RetSvc ==>|"Query vector (scoped to workspaceId)"| VEC_Search
-    VEC_Search ==>|"Top-K grounded chunks with pages"| RetSvc
-    ChatSvc ==>|"Recall relevant memories"| M0_Search
-    M0_Search ==>|"User preferences & facts"| ChatSvc
-    RetSvc -->|"Assembled & escaped context"| ChatSvc
-    ChatSvc ==>|"Grounded prompt: sources + memories"| OAI_Chat
-    OAI_Chat ==>|"Streamed answer + citations [1]"| User
+    %% RAG Chat Flow (Middle)
+    User ==>|"Ask question"| API
+    API ==>|"Query vector"| VDB
+    VDB ==>|"Relevant passages"| OAI
+    API -.->|"Fetch user facts"| M0
+    M0 -.->|"Preferences"| OAI
+    API ==>|"Grounded prompt"| OAI
+    OAI ==>|"Stream tokens"| Reply
 
-    %% Memory & Summary Flow
-    ChatSvc -.->|"Every 8 chat messages"| SummaryJob
-    SummaryJob -->|"Prior summary + new turns"| OAI_Summary
-    OAI_Summary -->|"Update rolling summary"| Postgres
-    SummaryJob ==>|"Learn facts from new messages"| M0_Learn
-    M0_Learn ==>|"Persist updated facts"| M0_Store
-
-    %% Artifact Generation Flow
-    User -. "3. Request artifact" .-> API
-    API -->|"Trigger artifact job"| ArtifactJob
-    ArtifactJob -->|"Fetch source chunks"| Postgres
-    ArtifactJob ==>|"Structured JSON generation"| OAI_Artifact
-    OAI_Artifact -->|"Save validated artifact"| Postgres
-    Postgres -.->|"View Quiz / Flashcards / Mind Map"| User
-
-    class User client
-    class ChatSvc,RetSvc,MemSvc,Queue api
-    class SourceJob,SummaryJob,ArtifactJob jobs
-    class OAI_Embed,OAI_Chat,OAI_Rewrite,OAI_Artifact,OAI_Summary openai
-    class M0_Learn,M0_Search,M0_Store mem0
-    class VEC_Index,VEC_Search,VEC_Meta vectordb
-    class Postgres store
+    %% Continuous Learning (Bottom)
+    Ingest -.->|"Learn facts from chat"| M0
 ```
 
 <details>
