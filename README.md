@@ -115,25 +115,86 @@ Why each tool was chosen, and what it does in this codebase: [Architecture → E
 ## Architecture
 
 ```mermaid
-flowchart LR
-    Client["Web client"] --> MW
+flowchart TB
+    %% Styling
+    classDef client fill:#f0f9ff,stroke:#0284c7,stroke-width:2px,color:#0c4a6e
+    classDef api fill:#f0fdf4,stroke:#16a34a,stroke-width:2px,color:#14532d
+    classDef jobs fill:#faf5ff,stroke:#9333ea,stroke-width:2px,color:#581c87
+    classDef data fill:#eff6ff,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+    classDef ext fill:#fffbeb,stroke:#d97706,stroke-width:2px,color:#78350f
+    classDef box fill:#ffffff,stroke:#cbd5e1,stroke-width:1px,color:#1e293b
 
-    subgraph API["Express API"]
+    subgraph CLIENT["💻 Web client (coming next)"]
         direction TB
-        MW["Middleware<br/>logs · CORS · rate limits · auth"] --> R["Routes → Controllers"] --> S["Services"] --> RP["Repositories"]
-        S --> Q["OpenAI queue"]
+        UI["<b>Next.js</b> (AI SDK useChat)<br/>• Ask questions<br/>• Upload PDF<br/>• Get sources<br/>• Streamed response (SSE)<br/>• Chat history<br/>• Manage workspaces"]:::client
     end
 
-    S -- "events" --> IN["Inngest"]
-    IN -- "/api/inngest" --> S
-    RP --> PG[("Postgres")]
-    RP --> PC[("Pinecone")]
-    RP --> M0[("Mem0")]
-    S --> CL[("Cloudinary")]
-    Q --> OAI["OpenAI"]
-    S --> EXT["Tavily · Firecrawl · YouTube"]
-    S -.-> LF["Langfuse"]
-    MW -. logs .-> AX["Axiom"]
+    subgraph INNGEST_BOX["⚡ Background jobs (Inngest)"]
+        direction LR
+        TRIGGERS["<b>Event triggers</b><br/>• source/created<br/>• artifact/generate<br/>• conversation/summarize<br/>• source/deleted<br/>• workspace/deleted"]:::jobs
+        FUNCS["<b>Functions</b> <i>(served at /api/inngest)</i><br/>• process-source (extract, chunk, embed, store)<br/>• generate-artifact (summary, flashcards, quiz, mind map, ...)<br/>• summarize-conversation (rolling summary)"]:::jobs
+        TRIGGERS -.-> FUNCS
+    end
+
+    subgraph API["🟩 Express API (Node.js + TypeScript)"]
+        direction TB
+        MW["🛡️ <b>Middleware</b><br/>Logging (pino-http) · CORS · Rate limits · Auth (Better Auth) · Body parsing"]:::box
+        ROUTES["🔀 <b>Feature routes (Express)</b><br/>/workspaces · /sources · /chat · /conversations · /artifacts · /memory · /health"]:::box
+
+        subgraph CORE_SERVICES[" "]
+            direction LR
+            SERVICES["⚙️ <b>Services (Business logic)</b><br/>Chat · Sources · Workspaces · Conversations<br/>Artifacts · Memory · Ingestion"]:::box
+            QUEUE["⏱️ <b>OpenAI queue (p-queue)</b><br/>LLM calls (chat + embeddings)"]:::box
+        end
+
+        REPOS["🗄️ <b>Repositories (Data access)</b><br/>Postgres (Prisma) · Pinecone · Mem0"]:::box
+
+        MW --> ROUTES --> SERVICES
+        SERVICES --> QUEUE
+        SERVICES --> REPOS
+    end
+
+    subgraph DATA["🗄️ Data stores"]
+        direction TB
+        PG[("🐘 <b>PostgreSQL</b> (via Prisma)<br/>Users, workspaces, sources, chats, artifacts, chunks, etc.")]:::data
+        PC[("🌲 <b>Pinecone</b> (Vector database)<br/>Document embeddings per workspace")]:::data
+        M0[("🧠 <b>Mem0</b> (User memories)<br/>Long-term memory across workspaces")]:::data
+        CL[("☁️ <b>Cloudinary</b> (PDF files)<br/>Store uploaded files (PDFs)")]:::data
+    end
+
+    subgraph EXT["🌐 AI and external services"]
+        direction TB
+        OAI["🤖 <b>OpenAI</b><br/>gpt-4o-mini / gpt-4o<br/>text-embedding-3-small"]:::ext
+        TAVILY["🔍 <b>Tavily</b><br/>Web search API (chat tool)"]:::ext
+        FIRE["🔥 <b>Firecrawl</b><br/>Website crawl (to markdown)"]:::ext
+        YT["▶️ <b>YouTube</b><br/>Transcripts (video transcripts)"]:::ext
+        LANGFUSE["📊 <b>Langfuse</b><br/>LLM tracing (OpenTelemetry)"]:::ext
+        AXIOM["📑 <b>Axiom</b><br/>Log storage (optional)"]:::ext
+    end
+
+    %% Client <-> API
+    CLIENT -- "HTTPS (session cookie)" --> MW
+    ROUTES -. "Streamed response (SSE)" .-> CLIENT
+
+    %% API <-> Inngest
+    SERVICES -- "Send event (e.g. source/created)" --> TRIGGERS
+    FUNCS -- "Invoke function (signed HTTP)" --> API
+
+    %% Repositories / Services -> Data Stores
+    REPOS -- "Read / Write (Prisma)" --> PG
+    REPOS -- "Store / Query (embeddings)" --> PC
+    REPOS -- "Store / Query (memories)" --> M0
+    SERVICES -- "Upload / Fetch (PDF files)" --> CL
+
+    %% AI & External calls
+    QUEUE -- "LLM calls (via queue)" --> OAI
+    SERVICES -- "Web search (chat tool)" --> TAVILY
+    SERVICES -- "Crawl website (for sources)" --> FIRE
+    SERVICES -- "Fetch transcripts (for sources)" --> YT
+
+    %% Observability
+    SERVICES -. "OpenTelemetry spans (tracing)" .-> LANGFUSE
+    MW -. "pino log lines (application logs)" .-> AXIOM
 ```
 
 <details>

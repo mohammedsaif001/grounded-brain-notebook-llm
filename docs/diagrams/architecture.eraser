@@ -7,66 +7,66 @@ styleMode shadow
 typeface clean
 
 // ----- Client -----
-Web Client [icon: monitor, color: gray, label: "Web client (AI SDK useChat)"]
+Web Client [icon: monitor, color: gray, label: "Web client (coming next)\nNext.js (AI SDK useChat)\n• Ask questions\n• Upload PDF\n• Get sources\n• Streamed response (SSE)\n• Chat history\n• Manage workspaces"]
 
 // ----- API -----
 Express API [icon: nodejs, color: green] {
-  Middleware [icon: shield, label: "pino-http · CORS · rate limits · Better Auth · Zod"]
-  Feature Routes [icon: git-branch, label: "workspaces · sources · chat · conversations · artifacts · memory · health"]
-  Services [icon: settings, label: "Services (business logic)"]
-  Repositories [icon: layers, label: "Repositories (Prisma · Pinecone · Mem0)"]
-  OpenAI Queue [icon: list, label: "Shared OpenAI queue (p-queue)"]
-  Inngest Endpoint [icon: zap, label: "/api/inngest (job functions)"]
+  Middleware [icon: shield, label: "Logging (pino-http) · CORS · Rate limits · Auth (Better Auth) · Body parsing"]
+  Feature Routes [icon: git-branch, label: "/workspaces · /sources · /chat · /conversations · /artifacts · /memory · /health"]
+  Services [icon: settings, label: "Services (Business logic)\nChat · Sources · Workspaces · Conversations · Artifacts · Memory · Ingestion"]
+  Repositories [icon: layers, label: "Repositories (Data access)\nPostgres (Prisma) · Pinecone · Mem0"]
+  OpenAI Queue [icon: list, label: "OpenAI queue (p-queue)\nLLM calls (chat + embeddings)"]
+  Inngest Endpoint [icon: zap, label: "Functions served at /api/inngest"]
 }
 
 // ----- Background jobs -----
-Inngest [icon: zap, color: purple] {
-  Event Bus [icon: radio, label: "Events: source/created · artifact/generate · conversation/summarize · source/deleted · workspace/deleted"]
-  process-source [icon: file-text]
-  generate-artifact [icon: book-open]
-  summarize-conversation [icon: message-square]
+Background jobs (Inngest) [icon: zap, color: purple] {
+  Event Bus [icon: radio, label: "Event triggers:\nsource/created · artifact/generate · conversation/summarize · source/deleted · workspace/deleted"]
+  process-source [icon: file-text, label: "process-source\n(extract, chunk, embed, store)"]
+  generate-artifact [icon: book-open, label: "generate-artifact\n(summary, flashcards, quiz, mind map, ...)"]
+  summarize-conversation [icon: message-square, label: "summarize-conversation\n(rolling summary)"]
 }
 
 // ----- Data -----
 Data stores [color: blue] {
-  PostgreSQL [icon: postgres, label: "PostgreSQL 16 (Docker locally) via Prisma"]
-  Pinecone [icon: database, label: "Pinecone (vectors, namespace per workspace)"]
-  Mem0 [icon: brain, label: "Mem0 (user memories)"]
-  Cloudinary [icon: cloud, label: "Cloudinary (PDF files)"]
+  PostgreSQL [icon: postgres, label: "PostgreSQL (via Prisma)\nUsers, workspaces, sources, chats, artifacts, chunks, etc."]
+  Pinecone [icon: database, label: "Pinecone (Vector database)\nDocument embeddings per workspace"]
+  Mem0 [icon: brain, label: "Mem0 (User memories)\nLong-term memory across workspaces"]
+  Cloudinary [icon: cloud, label: "Cloudinary (PDF files)\nStore uploaded files (PDFs)"]
 }
 
 // ----- AI and external services -----
-AI and external [color: orange] {
-  OpenAI [icon: openai, label: "OpenAI: gpt-4o-mini / gpt-4o · text-embedding-3-small"]
-  Tavily [icon: search, label: "Tavily (web search tool)"]
-  Firecrawl [icon: globe, label: "Firecrawl (website → markdown)"]
-  YouTube [icon: youtube, label: "YouTube transcripts"]
-  Langfuse [icon: activity, label: "Langfuse (LLM tracing)"]
-  Axiom [icon: file-text, label: "Axiom (log storage, optional)"]
+AI and external services [color: orange] {
+  OpenAI [icon: openai, label: "OpenAI\ngpt-4o-mini / gpt-4o · text-embedding-3-small"]
+  Tavily [icon: search, label: "Tavily\nWeb search API (chat tool)"]
+  Firecrawl [icon: globe, label: "Firecrawl\nWebsite crawl (to markdown)"]
+  YouTube [icon: youtube, label: "YouTube\nTranscripts (video transcripts)"]
+  Langfuse [icon: activity, label: "Langfuse\nLLM tracing (OpenTelemetry)"]
+  Axiom [icon: file-text, label: "Axiom\nLog storage (optional)"]
 }
 
 // ----- Connections -----
-Web Client > Middleware: HTTPS + session cookie
+Web Client > Middleware: HTTPS (session cookie)
 Middleware > Feature Routes
 Feature Routes > Services
-Feature Routes > Web Client: streamed chat reply (SSE)
+Feature Routes > Web Client: Streamed response (SSE)
 Services > Repositories
-Repositories > PostgreSQL: Prisma
-Repositories > Pinecone: upsert / query vectors
-Repositories > Mem0: search / add memories
-Services > Cloudinary: upload PDF
-Services > OpenAI Queue: every LLM + embedding call
+Repositories > PostgreSQL: Read / Write (Prisma)
+Repositories > Pinecone: Store / Query (embeddings)
+Repositories > Mem0: Store / Query (memories)
+Services > Cloudinary: Upload / Fetch (PDF files)
+Services > OpenAI Queue: LLM calls (via queue)
 OpenAI Queue > OpenAI
-Services > Tavily: web_search tool
-Services > Firecrawl: scrape website
-Services > YouTube: fetch transcript
-Services > Event Bus: send event
-Event Bus > Inngest Endpoint: invoke function (signed HTTP)
+Services > Tavily: Web search (chat tool)
+Services > Firecrawl: Crawl website (for sources)
+Services > YouTube: Fetch transcripts (for sources)
+Services > Event Bus: Send event (e.g. source/created)
+Event Bus > Inngest Endpoint: Invoke function (signed HTTP)
 Inngest Endpoint > process-source
 Inngest Endpoint > generate-artifact
 Inngest Endpoint > summarize-conversation
 process-source > Services
 generate-artifact > Services
 summarize-conversation > Services
-Services --> Langfuse: OpenTelemetry spans
-Middleware --> Axiom: pino log lines
+Services --> Langfuse: OpenTelemetry spans (tracing)
+Middleware --> Axiom: pino log lines (application logs)
