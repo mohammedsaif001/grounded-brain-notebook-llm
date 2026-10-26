@@ -282,7 +282,7 @@ AI-generated study material.
 
 | Column      | Type             | Notes                                                                      |
 | ----------- | ---------------- | -------------------------------------------------------------------------- |
-| `type`      | `ArtifactType`   | `SUMMARY`, `TAKEAWAYS`, `FLASHCARDS`, `QUIZ`, `MINDMAP`, `REPORT`          |
+| `type`      | `ArtifactType`   | `SUMMARY`, `TAKEAWAYS`, `FLASHCARDS`, `QUIZ`, `MINDMAP`, `REPORT`, `WIKI`  |
 | `title`     | `String`         | Given by the client, or e.g. `Quiz · 10/20/2026`                           |
 | `content`   | `Json?`          | Generated output; shape depends on `type` (see [§7](#7-json-columns))      |
 | `sourceIds` | `String[]`       | Postgres text array of the sources used. **Not a foreign key** (see below) |
@@ -370,13 +370,13 @@ search happens in Pinecone, not Postgres.
 
 ## 6. Enums and status lifecycles
 
-| Enum             | Values                                                            | Used by                    |
-| ---------------- | ----------------------------------------------------------------- | -------------------------- |
-| `SourceType`     | `PDF`, `WEBSITE`, `YOUTUBE`, `TEXT`, `MARKDOWN`                   | `source.type`              |
-| `SourceStatus`   | `PENDING`, `PROCESSING`, `READY`, `FAILED`                        | `source.status`            |
-| `MessageRole`    | `USER`, `ASSISTANT`                                               | `message.role`             |
-| `ArtifactType`   | `SUMMARY`, `TAKEAWAYS`, `FLASHCARDS`, `QUIZ`, `MINDMAP`, `REPORT` | `learning_artifact.type`   |
-| `ArtifactStatus` | `PENDING`, `PROCESSING`, `READY`, `FAILED`                        | `learning_artifact.status` |
+| Enum             | Values                                                                    | Used by                    |
+| ---------------- | ------------------------------------------------------------------------- | -------------------------- |
+| `SourceType`     | `PDF`, `WEBSITE`, `YOUTUBE`, `TEXT`, `MARKDOWN`                           | `source.type`              |
+| `SourceStatus`   | `PENDING`, `PROCESSING`, `READY`, `FAILED`                                | `source.status`            |
+| `MessageRole`    | `USER`, `ASSISTANT`                                                       | `message.role`             |
+| `ArtifactType`   | `SUMMARY`, `TAKEAWAYS`, `FLASHCARDS`, `QUIZ`, `MINDMAP`, `REPORT`, `WIKI` | `learning_artifact.type`   |
+| `ArtifactStatus` | `PENDING`, `PROCESSING`, `READY`, `FAILED`                                | `learning_artifact.status` |
 
 Web search results saved as sources use type `WEBSITE` (with `metadata.importedFrom = "web-search"`).
 

@@ -28,16 +28,18 @@ summaries, flashcards, quizzes, mind maps and reports. It also remembers what it
 
 ## What it does
 
-| Feature                 | Description                                                                                                                                                                                                                                           |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Workspaces**          | Separate notebooks, each with its own sources, chats and study material. Pick a default model per workspace.                                                                                                                                          |
-| **Sources**             | Add **PDFs** (uploaded and security-checked), **websites** (scraped to markdown), **YouTube videos** (transcripts), **plain text / markdown**, and **web search results**. Each source is extracted, chunked, embedded and indexed in the background. |
-| **Grounded chat (RAG)** | Ask questions; the answer streams back using only the relevant passages from your sources, with inline citations like `[1]` (with page numbers for PDFs). Follow-up questions are understood in context.                                              |
-| **Web search**          | Optionally let the model search the web (Tavily); web results are cited as `[W1]` and can be saved as sources.                                                                                                                                        |
-| **Long conversations**  | Older turns are condensed into a rolling summary in the background, so long chats stay coherent and affordable.                                                                                                                                       |
-| **Memory**              | The app learns durable facts about you from chats (Mem0), such as preferences or what you're studying, and uses them in later answers. You can also add, edit and delete memories yourself.                                                           |
-| **Learning artifacts**  | Generate a **summary**, **key takeaways**, **flashcards**, a **quiz**, a **mind map** or a long-form **report** from all or selected sources.                                                                                                         |
-| **Production basics**   | Cookie auth with Google OAuth, per-user isolation, rate limiting, validated config, structured logs, LLM tracing, health and readiness checks, graceful shutdown.                                                                                     |
+| Feature                 | Description                                                                                                                                                                                                                                                                    |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Workspaces**          | Separate notebooks, each with its own sources, chats and study material. Pick a default model per workspace.                                                                                                                                                                   |
+| **Sources**             | Add **PDFs** (uploaded and security-checked), **websites** (scraped to markdown), **YouTube videos** (transcripts), **GitHub repositories**, **plain text / markdown**, and **web search results**. Each source is extracted, chunked, embedded and indexed in the background. |
+| **Grounded chat (RAG)** | Ask questions; the answer streams back using only the relevant passages from your sources, with inline citations like `[1]` (with page numbers for PDFs). Follow-up questions are understood in context.                                                                       |
+| **Web search**          | Optionally let the model search the web (Tavily); web results are cited as `[W1]` and can be saved as sources.                                                                                                                                                                 |
+| **Long conversations**  | Older turns are condensed into a rolling summary in the background, so long chats stay coherent and affordable.                                                                                                                                                                |
+| **Memory**              | The app learns durable facts about you from chats (Mem0), such as preferences or what you're studying, and uses them in later answers. You can also add, edit and delete memories yourself.                                                                                    |
+| **Chat with a repo**    | Import a GitHub repo as one source and ask about the code; answers cite file paths like `[1] src/auth.ts`. **Sync** re-indexes it when the branch has new commits, and a **file list** shows what was indexed.                                                                 |
+| **Repo wiki**           | Generate a developer wiki from a repo: overview, tech stack, architecture, a Mermaid diagram, a module-by-module guide and getting-started steps.                                                                                                                              |
+| **Learning artifacts**  | Generate a **summary**, **key takeaways**, **flashcards**, a **quiz**, a **mind map** or a long-form **report** from all or selected sources.                                                                                                                                  |
+| **Production basics**   | Cookie auth with Google OAuth, per-user isolation, rate limiting, validated config, structured logs, LLM tracing, health and readiness checks, graceful shutdown.                                                                                                              |
 
 ---
 
@@ -96,6 +98,7 @@ flowchart LR
 | **Background jobs**      | [Inngest](https://www.inngest.com/)                                                                                | Durable, retried, cancellable jobs (indexing, generation, summaries)        |
 | **Web search**           | [Tavily](https://tavily.com/)                                                                                      | Chat `web_search` tool                                                      |
 | **Web scraping**         | [Firecrawl](https://www.firecrawl.dev/)                                                                            | Website → clean markdown                                                    |
+| **GitHub**               | [Octokit](https://github.com/octokit/rest.js)                                                                      | Reading repository files for GitHub sources                                 |
 | **File storage**         | [Cloudinary](https://cloudinary.com/)                                                                              | Uploaded PDFs                                                               |
 | **PDF parsing**          | [unpdf](https://github.com/unjs/unpdf) (pdf.js)                                                                    | Text per page; active-content checks                                        |
 | **YouTube**              | [youtube-transcript](https://www.npmjs.com/package/youtube-transcript)                                             | Video transcripts                                                           |
@@ -296,18 +299,19 @@ Icon diagrams (Eraser) are in [docs/diagrams](docs/diagrams/README.md).
 - **Docker** (for the local Postgres)
 - API keys:
 
-| Service                                        | Required                                    | Needed for                                         |
-| ---------------------------------------------- | ------------------------------------------- | -------------------------------------------------- |
-| [OpenAI](https://platform.openai.com/api-keys) | **yes**                                     | Chat, embeddings, artifacts                        |
-| [Pinecone](https://app.pinecone.io/)           | **yes**                                     | Vector search (the index is created automatically) |
-| [Inngest](https://www.inngest.com/)            | no locally (dev server) / yes in production | Background jobs                                    |
-| [Cloudinary](https://cloudinary.com/)          | optional                                    | PDF uploads (unsigned upload preset)               |
-| [Firecrawl](https://www.firecrawl.dev/)        | optional                                    | Website imports                                    |
-| [Tavily](https://tavily.com/)                  | optional                                    | Web search in chat                                 |
-| [Mem0](https://app.mem0.ai/)                   | optional                                    | Memories                                           |
-| [Langfuse](https://langfuse.com/)              | optional                                    | LLM tracing                                        |
-| [Axiom](https://axiom.co/)                     | optional                                    | Stored, searchable logs                            |
-| Google OAuth client                            | optional locally / yes in production        | Google sign-in                                     |
+| Service                                                            | Required                                    | Needed for                                             |
+| ------------------------------------------------------------------ | ------------------------------------------- | ------------------------------------------------------ |
+| [OpenAI](https://platform.openai.com/api-keys)                     | **yes**                                     | Chat, embeddings, artifacts                            |
+| [Pinecone](https://app.pinecone.io/)                               | **yes**                                     | Vector search (the index is created automatically)     |
+| [Inngest](https://www.inngest.com/)                                | no locally (dev server) / yes in production | Background jobs                                        |
+| [Cloudinary](https://cloudinary.com/)                              | optional                                    | PDF uploads (unsigned upload preset)                   |
+| [Firecrawl](https://www.firecrawl.dev/)                            | optional                                    | Website imports                                        |
+| [Tavily](https://tavily.com/)                                      | optional                                    | Web search in chat                                     |
+| [GitHub token](https://github.com/settings/personal-access-tokens) | optional                                    | Private repos and a higher rate limit for repo imports |
+| [Mem0](https://app.mem0.ai/)                                       | optional                                    | Memories                                               |
+| [Langfuse](https://langfuse.com/)                                  | optional                                    | LLM tracing                                            |
+| [Axiom](https://axiom.co/)                                         | optional                                    | Stored, searchable logs                                |
+| Google OAuth client                                                | optional locally / yes in production        | Google sign-in                                         |
 
 Optional integrations degrade gracefully: their endpoints return `503` and everything else works.
 
@@ -397,16 +401,16 @@ Each feature has the same files: `*.routes.ts`, `*.controller.ts`, `*.validator.
 
 ## API at a glance
 
-| Feature       | Base path                           | Highlights                                                                                       |
-| ------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Health        | `/health`, `/health/ready`          | Liveness; readiness of every dependency                                                          |
-| Auth          | `/api/auth/*`, `/api/me`            | Better Auth sign-up/sign-in/sign-out, Google OAuth                                               |
-| Workspaces    | `/api/workspaces`                   | CRUD                                                                                             |
-| Sources       | `/api/workspaces/:id/sources`       | Text/markdown, PDF upload, website, YouTube, web results; list/filter, chunks, reprocess, delete |
-| Chat          | `/api/workspaces/:id/chat`          | Streamed, cited answers; optional web search                                                     |
-| Conversations | `/api/workspaces/:id/conversations` | List, create, message history with citations, delete                                             |
-| Artifacts     | `/api/workspaces/:id/artifacts`     | Generate and fetch study material                                                                |
-| Memory        | `/api/memory`                       | List, add, edit, delete memories                                                                 |
+| Feature       | Base path                           | Highlights                                                                                                                          |
+| ------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Health        | `/health`, `/health/ready`          | Liveness; readiness of every dependency                                                                                             |
+| Auth          | `/api/auth/*`, `/api/me`            | Better Auth sign-up/sign-in/sign-out, Google OAuth                                                                                  |
+| Workspaces    | `/api/workspaces`                   | CRUD                                                                                                                                |
+| Sources       | `/api/workspaces/:id/sources`       | Text/markdown, PDF upload, website, YouTube, GitHub repo (import, sync, files), web results; list/filter, chunks, reprocess, delete |
+| Chat          | `/api/workspaces/:id/chat`          | Streamed, cited answers; optional web search                                                                                        |
+| Conversations | `/api/workspaces/:id/conversations` | List, create, message history with citations, delete                                                                                |
+| Artifacts     | `/api/workspaces/:id/artifacts`     | Generate and fetch study material                                                                                                   |
+| Memory        | `/api/memory`                       | List, add, edit, delete memories                                                                                                    |
 
 Every JSON response uses the envelope `{ success, data }` or `{ success, error: { code, message, details } }`.
 

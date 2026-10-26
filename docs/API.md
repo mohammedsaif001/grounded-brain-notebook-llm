@@ -373,6 +373,43 @@ Accepts `watch?v=`, `youtu.be/`, `embed/` and `shorts/` URLs. The title defaults
 `YouTube: <videoId>`. **400** for an invalid URL or a video without captions (collection test:
 **[400] Bad YouTube URL**).
 
+### Import a GitHub repository: `POST .../sources/import/github`
+
+```json
+{ "url": "owner/repo", "branch": "optional", "title": "optional" }
+```
+
+Accepts `owner/repo`, `https://github.com/owner/repo(.git)` or `git@github.com:owner/repo.git`.
+The whole repository becomes **one** `GITHUB` source: text files are read (up to 200 files /
+2 MB, overview files first; lockfiles, binaries, `node_modules`, `dist`, ... are skipped) and
+chunked per file, so every chunk and chat citation carries the file `path`. The title defaults
+to `owner/repo`. Public repos work without a token; set `GITHUB_TOKEN` on the server for
+private repos and a higher rate limit.
+
+`metadata` holds `owner`, `repo`, `branch`, `commitSha`, `totalFiles`, `truncated` and the list
+of indexed `files`. **404** repo not found / private, **409** already in the workspace,
+**503** GitHub rate limit or bad server token.
+
+### Sync a repository: `POST .../sources/:sourceId/sync`
+
+Checks the branch's latest commit (one API call). **202** with `{ "source", "changed": false }`
+when nothing changed; otherwise the repo is re-read, the source goes back to `PENDING` and is
+re-indexed (`changed: true`). Old vectors keep serving chat until the new index replaces them.
+**400** for non-GitHub sources, **409** while the source is still processing.
+
+### List repository files: `GET .../sources/:sourceId/files`
+
+```json
+{
+    "repo": "owner/repo",
+    "branch": "main",
+    "commitSha": "d0dd1f6...",
+    "totalFiles": 42,
+    "truncated": false,
+    "files": [{ "path": "src/index.ts", "size": 1832, "chunkCount": 3 }]
+}
+```
+
 ### Import a web search result: `POST .../sources/import/web-search`
 
 ```json
@@ -563,11 +600,11 @@ with `metadata.processingError`).
 { "type": "QUIZ", "title": "Photosynthesis quiz", "sourceIds": ["cm2src..."] }
 ```
 
-| Field       | Required | Notes                                                             |
-| ----------- | -------- | ----------------------------------------------------------------- |
-| `type`      | yes      | `SUMMARY`, `TAKEAWAYS`, `FLASHCARDS`, `QUIZ`, `MINDMAP`, `REPORT` |
-| `title`     | no       | ≤ 120; default like `Quiz · 10/20/2026`                           |
-| `sourceIds` | no       | Limit to these sources; default: all READY sources                |
+| Field       | Required | Notes                                                                     |
+| ----------- | -------- | ------------------------------------------------------------------------- |
+| `type`      | yes      | `SUMMARY`, `TAKEAWAYS`, `FLASHCARDS`, `QUIZ`, `MINDMAP`, `REPORT`, `WIKI` |
+| `title`     | no       | ≤ 120; default like `Quiz · 10/20/2026`                                   |
+| `sourceIds` | no       | Limit to these sources; default: all READY sources                        |
 
 **400** `BAD_REQUEST` when there are no READY sources (or none of `sourceIds` are READY).
 
@@ -592,14 +629,15 @@ with `metadata.processingError`).
 
 `content` by type:
 
-| Type         | `content`                                                                                                        |
-| ------------ | ---------------------------------------------------------------------------------------------------------------- |
-| `SUMMARY`    | `{ "markdown": "..." }`                                                                                          |
-| `TAKEAWAYS`  | `{ "items": ["...", "..."] }`                                                                                    |
-| `FLASHCARDS` | `{ "cards": [{ "front", "back" }] }`                                                                             |
-| `QUIZ`       | `{ "questions": [{ "question", "options": [...], "correctIndex", "explanation" }] }` (`correctIndex` is 0-based) |
-| `MINDMAP`    | `{ "nodes": [{ "id", "label" }], "edges": [{ "id", "source", "target" }] }`                                      |
-| `REPORT`     | `{ "markdown": "...", "sections": [{ "title", "content" }] }`                                                    |
+| Type         | `content`                                                                                                                                                                                                                 |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SUMMARY`    | `{ "markdown": "..." }`                                                                                                                                                                                                   |
+| `TAKEAWAYS`  | `{ "items": ["...", "..."] }`                                                                                                                                                                                             |
+| `FLASHCARDS` | `{ "cards": [{ "front", "back" }] }`                                                                                                                                                                                      |
+| `QUIZ`       | `{ "questions": [{ "question", "options": [...], "correctIndex", "explanation" }] }` (`correctIndex` is 0-based)                                                                                                          |
+| `MINDMAP`    | `{ "nodes": [{ "id", "label" }], "edges": [{ "id", "source", "target" }] }`                                                                                                                                               |
+| `REPORT`     | `{ "markdown": "...", "sections": [{ "title", "content" }] }`                                                                                                                                                             |
+| `WIKI`       | `{ "overview", "techStack": [{ "name", "purpose" }], "architecture", "diagram", "modules": [{ "name", "path", "description", "keyFiles" }], "gettingStarted" }` (`diagram` is raw Mermaid; needs a READY `GITHUB` source) |
 
 | Request                                                    | Endpoint                                   | Success                     |
 | ---------------------------------------------------------- | ------------------------------------------ | --------------------------- |
@@ -669,12 +707,15 @@ With no session, protected routes return **401 `UNAUTHORIZED`**:
 | POST   | `/api/workspaces/:workspaceId/sources/upload`                         | ✓      | 201          | multipart PDF · ingestion limit   |
 | POST   | `/api/workspaces/:workspaceId/sources/import/website`                 | ✓      | 201          | ingestion limit                   |
 | POST   | `/api/workspaces/:workspaceId/sources/import/youtube`                 | ✓      | 201          | ingestion limit                   |
+| POST   | `/api/workspaces/:workspaceId/sources/import/github`                  | ✓      | 201          | ingestion limit                   |
 | POST   | `/api/workspaces/:workspaceId/sources/import/web-search`              | ✓      | 201          | ingestion limit                   |
 | POST   | `/api/workspaces/:workspaceId/sources/bulk-delete`                    | ✓      | 204          |                                   |
 | POST   | `/api/workspaces/:workspaceId/sources/reprocess`                      | ✓      | 200          | FAILED only · ingestion limit     |
 | GET    | `/api/workspaces/:workspaceId/sources/:sourceId`                      | ✓      | 200          |                                   |
 | DELETE | `/api/workspaces/:workspaceId/sources/:sourceId`                      | ✓      | 204          |                                   |
 | GET    | `/api/workspaces/:workspaceId/sources/:sourceId/chunks`               | ✓      | 200          |                                   |
+| GET    | `/api/workspaces/:workspaceId/sources/:sourceId/files`                | ✓      | 200          | GITHUB only                       |
+| POST   | `/api/workspaces/:workspaceId/sources/:sourceId/sync`                 | ✓      | 202          | GITHUB only · ingestion limit     |
 | POST   | `/api/workspaces/:workspaceId/sources/:sourceId/reprocess`            | ✓      | 202          | ingestion limit                   |
 | POST   | `/api/workspaces/:workspaceId/chat`                                   | ✓      | 200 (stream) | AI limit                          |
 | GET    | `/api/workspaces/:workspaceId/conversations`                          | ✓      | 200          |                                   |

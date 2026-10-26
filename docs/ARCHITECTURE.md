@@ -567,6 +567,7 @@ auth and receive `:workspaceId`.
 | `POST /upload` (multipart `file`) | `PDF`               | **Validated** (`PdfValidator`), **uploaded** to Cloudinary, text extracted best effort (`PdfExtractor`) |
 | `POST /import/website`            | `WEBSITE`           | Scraped to markdown by **Firecrawl**                                                                    |
 | `POST /import/youtube`            | `YOUTUBE`           | Transcript fetched with **youtube-transcript**                                                          |
+| `POST /import/github`             | `GITHUB`            | Repo read with **Octokit**; text files packed into one source, chunked per file with `metadata.path`    |
 | `POST /import/web-search`         | `WEBSITE`           | A web result the user chose to keep (title + content + URL)                                             |
 
 Every path ends in `SourceService.createAndQueue`: insert the row as `PENDING` and publish
@@ -839,7 +840,7 @@ sequenceDiagram
 
 </details>
 
-- **Types:** `SUMMARY` (markdown), `TAKEAWAYS`, `FLASHCARDS`, `QUIZ`, `MINDMAP`, `REPORT`.
+- **Types:** `SUMMARY` (markdown), `TAKEAWAYS`, `FLASHCARDS`, `QUIZ`, `MINDMAP`, `REPORT`, `WIKI` (repository overview, architecture, Mermaid diagram and module guide; GITHUB sources only).
   All but `SUMMARY` use `Output.object({ schema })`, so the model must return JSON matching a
   Zod schema. Shapes are listed in [DATABASE.md](DATABASE.md#learning_artifactcontent-by-type).
 - **Fitting large sources into one prompt** (`ArtifactGenerationService.gatherSourceContext`):
