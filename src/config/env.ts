@@ -72,6 +72,8 @@ const envSchema = z
         CLOUDINARY_API_SECRET: optionalString,
 
         FIRECRAWL_API_KEY: optionalString,
+        // Raises GitHub's API rate limit and allows private repos the token can read.
+        GITHUB_TOKEN: optionalString,
         TAVILY_API_KEY: optionalString,
         MEM0_API_KEY: optionalString,
 
