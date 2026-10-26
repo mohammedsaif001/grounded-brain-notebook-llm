@@ -2,7 +2,7 @@ import { z } from "zod";
 import { workspaceIdParamSchema } from "../workspace/workspace.validator.js";
 
 /** Source kinds a client may filter by. */
-const sourceTypeSchema = z.enum(["PDF", "WEBSITE", "YOUTUBE", "TEXT", "MARKDOWN"]);
+const sourceTypeSchema = z.enum(["PDF", "WEBSITE", "YOUTUBE", "TEXT", "MARKDOWN", "GITHUB"]);
 
 /** Processing states a source moves through: PENDING → PROCESSING → READY or FAILED. */
 const sourceStatusSchema = z.enum(["PENDING", "PROCESSING", "READY", "FAILED"]);
@@ -51,6 +51,13 @@ export const importYoutubeSchema = z.object({
     title: z.string().trim().max(200).optional(),
 });
 
+/** Body for importing a GitHub repository: `owner/repo` or a URL, plus optional branch and title. */
+export const importGithubSchema = z.object({
+    url: z.string().trim().min(1, "Repository is required").max(300),
+    branch: z.string().trim().min(1).max(250).optional(),
+    title: z.string().trim().max(200).optional(),
+});
+
 /** Text fields sent alongside the PDF in the multipart upload form. */
 export const uploadPdfBodySchema = z.object({
     title: z.string().trim().max(200).optional(),
@@ -81,6 +88,8 @@ export type ListSourcesQuery = z.infer<typeof listSourcesQuerySchema>;
 export type ImportWebsiteInput = z.infer<typeof importWebsiteSchema>;
 /** Validated input for importing a YouTube video. */
 export type ImportYoutubeInput = z.infer<typeof importYoutubeSchema>;
+/** Validated input for importing a GitHub repository. */
+export type ImportGithubInput = z.infer<typeof importGithubSchema>;
 /** Validated input for bulk-deleting sources. */
 export type BulkDeleteSourcesInput = z.infer<typeof bulkDeleteSourcesSchema>;
 /** Validated input for reprocessing failed sources. */

@@ -2,6 +2,7 @@ import type { Prisma } from "../../generated/prisma/client.js";
 import { EventPublisher } from "../../jobs/events.js";
 import { CloudinaryStorage } from "./ingestion/cloudinary.js";
 import { FirecrawlScraper } from "./ingestion/firecrawl.js";
+import { GithubRepoClient, type RepoSnapshot } from "./ingestion/github.js";
 import { PdfExtractor } from "./ingestion/pdf.js";
 import { PdfValidator } from "./ingestion/pdf-validator.js";
 import { YoutubeClient } from "./ingestion/youtube.js";
@@ -9,14 +10,45 @@ import { SourceRepository, type CreateSourceData, type SourceRecord } from "./so
 import { APIError } from "../../shared/http/api-error.js";
 import type {
     CreateSourceInput,
+    ImportGithubInput,
     ImportWebSearchInput,
     ImportWebsiteInput,
     ImportYoutubeInput,
     ListSourcesQuery,
     ReprocessSourcesInput,
 } from "./source.validator.js";
-import { SourceProcessingService } from "./source-processing.service.js";
+import { SourceChunkRepository } from "./source-chunk.repository.js";
+import { SourceProcessingService, type SourceMetadata } from "./source-processing.service.js";
 import { WorkspaceService } from "../workspace/workspace.service.js";
+
+/**
+ * Metadata stored on a GITHUB source: where it came from, the commit it was read at, and
+ * the files that were read (so listing them never needs the packed content).
+ *
+ * @param snapshot - Repository contents just read from GitHub
+ */
+function githubMetadata(snapshot: RepoSnapshot): Prisma.InputJsonObject {
+    return {
+        importedFrom: `https://github.com/${snapshot.owner}/${snapshot.repo}`,
+        owner: snapshot.owner,
+        repo: snapshot.repo,
+        branch: snapshot.branch,
+        commitSha: snapshot.commitSha,
+        description: snapshot.description,
+        totalFiles: snapshot.totalFiles,
+        truncated: snapshot.truncated,
+        files: snapshot.files.map((file) => ({ path: file.path, size: file.content.length })),
+    };
+}
+
+/**
+ * Reads a source's `metadata` as an object, tolerating null or malformed JSON.
+ *
+ * @param metadata - Raw JSON column value
+ */
+function readMetadata(metadata: SourceRecord["metadata"]): SourceMetadata {
+    return metadata && typeof metadata === "object" && !Array.isArray(metadata) ? metadata : {};
+}
 
 /** Source business logic: imports, CRUD, and (re)processing requests. */
 export class SourceService {
@@ -214,6 +246,142 @@ export class SourceService {
                 videoId: transcript.videoId,
             },
         });
+    }
+
+    /**
+     * Reads a GitHub repository and creates one GITHUB source from its text files.
+     *
+     * The repository is fetched here (so bad URLs, missing repos and rate limits fail the
+     * request); chunking, embedding and indexing run in the background like any source.
+     *
+     * @param workspaceId - Workspace to add the source to
+     * @param userId - Requesting user; must own the workspace
+     * @param input - `owner/repo` or URL, optional branch and title
+     * @throws {APIError} BadRequest for an invalid repo, NotFound when it can't be read,
+     *   Conflict when it is already in the workspace
+     */
+    static async importGithub(workspaceId: string, userId: string, input: ImportGithubInput) {
+        await WorkspaceService.getForUser(workspaceId, userId);
+
+        const { owner, repo } = GithubRepoClient.parseRepo(input.url);
+        const url = `https://github.com/${owner}/${repo}`;
+
+        const existing = await SourceRepository.findAllByWorkspaceId(workspaceId, {
+            type: "GITHUB",
+        });
+        if (existing.some((source) => source.url?.toLowerCase() === url.toLowerCase())) {
+            throw APIError.Conflict(
+                "This repository is already in the workspace. Sync it instead.",
+            );
+        }
+
+        const snapshot = await GithubRepoClient.fetchRepo(owner, repo, input.branch);
+
+        return this.createAndQueue({
+            workspaceId,
+            type: "GITHUB",
+            title: input.title || `${owner}/${repo}`,
+            content: GithubRepoClient.pack(snapshot.files),
+            url,
+            status: "PENDING",
+            metadata: githubMetadata(snapshot),
+        });
+    }
+
+    /**
+     * Re-reads a GitHub source's repository and re-indexes it when the branch has new commits.
+     *
+     * Costs one API call when nothing changed. Existing vectors keep serving chat until the
+     * new index replaces them.
+     *
+     * @param workspaceId - Workspace the source belongs to
+     * @param sourceId - GITHUB source to sync
+     * @param userId - Requesting user
+     * @returns The source and whether new commits were found
+     * @throws {APIError} BadRequest for non-GitHub sources, Conflict while it is still processing
+     */
+    static async syncGithub(workspaceId: string, sourceId: string, userId: string) {
+        const source = await this.get(workspaceId, sourceId, userId);
+
+        if (source.type !== "GITHUB") {
+            throw APIError.BadRequest("Only GitHub sources can be synced");
+        }
+        if (source.status === "PENDING" || source.status === "PROCESSING") {
+            throw APIError.Conflict("This repository is still being processed");
+        }
+
+        const metadata = readMetadata(source.metadata);
+        if (!metadata.owner || !metadata.repo) {
+            throw APIError.BadRequest("This source has no repository information");
+        }
+
+        const head = await GithubRepoClient.getHead(metadata.owner, metadata.repo, metadata.branch);
+        if (source.status === "READY" && head.commitSha === metadata.commitSha) {
+            return { source, changed: false };
+        }
+
+        const snapshot = await GithubRepoClient.fetchRepo(
+            metadata.owner,
+            metadata.repo,
+            metadata.branch,
+        );
+
+        const updated = await SourceRepository.update(sourceId, {
+            content: GithubRepoClient.pack(snapshot.files),
+            status: "PENDING",
+            metadata: {
+                ...githubMetadata(snapshot),
+                syncedAt: new Date().toISOString(),
+            },
+        });
+
+        await EventPublisher.sourceCreated({ sourceId, workspaceId });
+
+        return { source: updated, changed: true };
+    }
+
+    /**
+     * Lists the files indexed from a GitHub source, with how many chunks each produced.
+     *
+     * @param workspaceId - Workspace the source belongs to
+     * @param sourceId - GITHUB source whose files to list
+     * @param userId - Requesting user
+     * @throws {APIError} BadRequest when the source is not a GitHub repository
+     */
+    static async getGithubFiles(workspaceId: string, sourceId: string, userId: string) {
+        const source = await this.get(workspaceId, sourceId, userId);
+
+        if (source.type !== "GITHUB") {
+            throw APIError.BadRequest("Only GitHub sources have files");
+        }
+
+        const metadata = readMetadata(source.metadata);
+        const chunks = await SourceChunkRepository.findAllBySourceId(sourceId);
+
+        const chunkCounts = new Map<string, number>();
+        for (const chunk of chunks) {
+            const path =
+                chunk.metadata &&
+                typeof chunk.metadata === "object" &&
+                !Array.isArray(chunk.metadata)
+                    ? chunk.metadata.path
+                    : undefined;
+            if (typeof path === "string") {
+                chunkCounts.set(path, (chunkCounts.get(path) ?? 0) + 1);
+            }
+        }
+
+        return {
+            repo: metadata.owner && metadata.repo ? `${metadata.owner}/${metadata.repo}` : null,
+            branch: metadata.branch ?? null,
+            commitSha: metadata.commitSha ?? null,
+            totalFiles: metadata.totalFiles ?? null,
+            truncated: metadata.truncated ?? false,
+            files: (metadata.files ?? []).map((file) => ({
+                ...file,
+                chunkCount: chunkCounts.get(file.path) ?? 0,
+            })),
+        };
     }
 
     /**

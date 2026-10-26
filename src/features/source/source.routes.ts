@@ -34,6 +34,11 @@ sourceRouter.post(
     asyncHandler(SourceController.importYoutube),
 );
 sourceRouter.post(
+    "/import/github",
+    ingestionRateLimiter,
+    asyncHandler(SourceController.importGithub),
+);
+sourceRouter.post(
     "/import/web-search",
     ingestionRateLimiter,
     asyncHandler(SourceController.importWebSearch),
@@ -49,6 +54,12 @@ sourceRouter.post(
 sourceRouter.get("/:sourceId", asyncHandler(SourceController.get));
 sourceRouter.delete("/:sourceId", asyncHandler(SourceController.delete));
 sourceRouter.get("/:sourceId/chunks", asyncHandler(SourceController.getChunks));
+sourceRouter.get("/:sourceId/files", asyncHandler(SourceController.getGithubFiles));
+sourceRouter.post(
+    "/:sourceId/sync",
+    ingestionRateLimiter,
+    asyncHandler(SourceController.syncGithub),
+);
 sourceRouter.post(
     "/:sourceId/reprocess",
     ingestionRateLimiter,

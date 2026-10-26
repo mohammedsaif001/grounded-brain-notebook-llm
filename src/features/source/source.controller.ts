@@ -5,6 +5,7 @@ import { APIResponse } from "../../shared/http/api-response.js";
 import {
     bulkDeleteSourcesSchema,
     createSourceSchema,
+    importGithubSchema,
     importWebSearchSchema,
     importWebsiteSchema,
     importYoutubeSchema,
@@ -75,6 +76,14 @@ export class SourceController {
         APIResponse.Created(res, source);
     };
 
+    /** POST `/import/github` - reads a GitHub repository into one source (201). */
+    static importGithub = async (req: Request, res: Response) => {
+        const { workspaceId } = workspaceIdParamSchema.parse(req.params);
+        const input = importGithubSchema.parse(req.body);
+        const source = await SourceService.importGithub(workspaceId, req.session.user.id, input);
+        APIResponse.Created(res, source);
+    };
+
     /** POST `/import/web-search` — saves a chosen web search result as a source (201). */
     static importWebSearch = async (req: Request, res: Response) => {
         const { workspaceId } = workspaceIdParamSchema.parse(req.params);
@@ -110,6 +119,24 @@ export class SourceController {
         const { workspaceId, sourceId } = sourceIdParamSchema.parse(req.params);
         await SourceService.reprocess(workspaceId, sourceId, req.session.user.id);
         APIResponse.Accepted(res, { reprocessed: true });
+    };
+
+    /** POST `/:sourceId/sync` - re-reads a GitHub source and re-indexes it if it changed (202). */
+    static syncGithub = async (req: Request, res: Response) => {
+        const { workspaceId, sourceId } = sourceIdParamSchema.parse(req.params);
+        const result = await SourceService.syncGithub(workspaceId, sourceId, req.session.user.id);
+        APIResponse.Accepted(res, result);
+    };
+
+    /** GET `/:sourceId/files` - lists the files indexed from a GitHub source (200). */
+    static getGithubFiles = async (req: Request, res: Response) => {
+        const { workspaceId, sourceId } = sourceIdParamSchema.parse(req.params);
+        const result = await SourceService.getGithubFiles(
+            workspaceId,
+            sourceId,
+            req.session.user.id,
+        );
+        APIResponse.Ok(res, result);
     };
 
     /** POST `/reprocess` — re-queues FAILED sources, optionally limited to `sourceIds` (200). */
