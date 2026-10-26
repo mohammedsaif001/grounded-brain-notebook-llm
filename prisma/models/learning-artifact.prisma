@@ -1,4 +1,4 @@
-// AI-generated study material (summary, quiz, flashcards, mind map, ...).
+// AI-generated study material (summary, quiz, flashcards, mind map, repo wiki, ...).
 model LearningArtifact {
   id          String         @id @default(cuid())
   workspaceId String
@@ -25,6 +25,7 @@ enum ArtifactType {
   QUIZ
   MINDMAP
   REPORT
+  WIKI
 }
 
 enum ArtifactStatus {

@@ -1,4 +1,4 @@
-// Content imported into a workspace (PDF, website, YouTube, text, markdown).
+// Content imported into a workspace (PDF, website, YouTube, text, markdown, GitHub repo).
 model Source {
   id          String        @id @default(cuid())
   workspaceId String
@@ -25,6 +25,7 @@ enum SourceType {
   YOUTUBE
   TEXT
   MARKDOWN
+  GITHUB
 }
 
 enum SourceStatus {
