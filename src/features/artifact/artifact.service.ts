@@ -13,6 +13,7 @@ const DEFAULT_ARTIFACT_TITLES: Record<ArtifactRecord["type"], string> = {
     QUIZ: "Quiz",
     MINDMAP: "Mind Map",
     REPORT: "AI Report",
+    WIKI: "Repo Wiki",
 };
 
 /** Learning artifact business logic: CRUD plus the background generation entry point. */
@@ -69,6 +70,7 @@ export class ArtifactService {
         const sourceIds = await ArtifactGenerationService.resolveReadySourceIds(
             workspaceId,
             input.sourceIds,
+            input.type === "WIKI" ? "GITHUB" : undefined,
         );
 
         const artifact = await ArtifactRepository.create({

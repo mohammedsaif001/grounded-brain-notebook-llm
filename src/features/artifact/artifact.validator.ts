@@ -1,8 +1,16 @@
 import { z } from "zod";
 import { workspaceIdParamSchema } from "../workspace/workspace.validator.js";
 
-/** Supported learning artifact kinds. */
-const artifactTypes = ["SUMMARY", "TAKEAWAYS", "FLASHCARDS", "QUIZ", "MINDMAP", "REPORT"] as const;
+/** Supported learning artifact kinds. `WIKI` needs a GitHub repository source. */
+const artifactTypes = [
+    "SUMMARY",
+    "TAKEAWAYS",
+    "FLASHCARDS",
+    "QUIZ",
+    "MINDMAP",
+    "REPORT",
+    "WIKI",
+] as const;
 
 /** Route params for artifact-specific endpoints (`:workspaceId` and `:artifactId`). */
 export const artifactIdParamSchema = workspaceIdParamSchema.extend({

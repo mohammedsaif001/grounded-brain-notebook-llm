@@ -12,6 +12,7 @@ import {
     ARTIFACT_MAX_CONTEXT_CHARS,
     CHAT_MODEL,
 } from "../../config/ai.config.js";
+import { GithubRepoClient } from "../source/ingestion/github.js";
 import { SourceService } from "../source/source.service.js";
 import type { ArtifactRecord } from "./artifact.repository.js";
 import { APIError } from "../../shared/http/api-error.js";
@@ -84,6 +85,26 @@ const reportSchema = z.object({
             content: z.string(),
         }),
     ),
+});
+
+/** Model output for WIKI: a repository overview, architecture, diagram and per-module guide. */
+const wikiSchema = z.object({
+    overview: z.string(),
+    techStack: z.array(z.object({ name: z.string(), purpose: z.string() })).max(25),
+    architecture: z.string(),
+    diagram: z.string(),
+    modules: z
+        .array(
+            z.object({
+                name: z.string(),
+                path: z.string(),
+                description: z.string(),
+                keyFiles: z.array(z.string()).max(10),
+            }),
+        )
+        .min(1)
+        .max(30),
+    gettingStarted: z.string(),
 });
 
 /**
@@ -209,6 +230,22 @@ function sanitizeMindmap(mindmap: z.infer<typeof mindmapSchema>) {
     return { nodes, edges };
 }
 
+/**
+ * Strips markdown code fences the model may wrap a Mermaid diagram in, so the client
+ * can pass `diagram` straight to a Mermaid renderer.
+ *
+ * @param wiki - Raw wiki returned by the model
+ * @returns The wiki with a clean `diagram` string
+ */
+function sanitizeWiki(wiki: z.infer<typeof wikiSchema>) {
+    const diagram = wiki.diagram
+        .replace(/^\s*```(?:mermaid)?\s*/i, "")
+        .replace(/\s*```\s*$/, "")
+        .trim();
+
+    return { ...wiki, diagram };
+}
+
 /** Builds the source context for learning artifacts and generates their content with the model. */
 export class ArtifactGenerationService {
     /**
@@ -218,11 +255,18 @@ export class ArtifactGenerationService {
      *
      * @param workspaceId - Workspace whose sources to check
      * @param sourceIds - Optional subset of source ids; defaults to all READY sources
+     * @param onlyType - When set, only sources of this type are used (e.g. `GITHUB` for a wiki)
      * @returns Ids of the READY sources that will be used
      * @throws {APIError} BadRequest when no ready sources match
      */
-    static async resolveReadySourceIds(workspaceId: string, sourceIds?: string[]) {
-        const sources = await SourceService.listReady(workspaceId);
+    static async resolveReadySourceIds(
+        workspaceId: string,
+        sourceIds?: string[],
+        onlyType?: "GITHUB",
+    ) {
+        const sources = (await SourceService.listReady(workspaceId)).filter(
+            (source) => !onlyType || source.type === onlyType,
+        );
 
         const selected = sourceIds?.length
             ? sources.filter((source) => sourceIds.includes(source.id))
@@ -230,7 +274,9 @@ export class ArtifactGenerationService {
 
         if (selected.length === 0) {
             throw APIError.BadRequest(
-                "No ready sources found. Add and process sources before generating learning tools.",
+                onlyType === "GITHUB"
+                    ? "No ready GitHub repositories found. Import and process a repository first."
+                    : "No ready sources found. Add and process sources before generating learning tools.",
             );
         }
 
@@ -265,25 +311,40 @@ export class ArtifactGenerationService {
 
         const withContent = selected.flatMap((source) => {
             const content = source.content?.trim();
-            return content ? [{ title: source.title, content }] : [];
+            if (!content) {
+                return [];
+            }
+
+            // Repositories lead with their file tree so structure survives condensing.
+            const files =
+                source.type === "GITHUB" && source.metadata && typeof source.metadata === "object"
+                    ? (source.metadata as { files?: { path: string }[] }).files
+                    : undefined;
+            const header = files?.length
+                ? `File tree:\n${GithubRepoClient.renderTree(files.map((file) => file.path))}\n\n`
+                : "";
+
+            return [{ title: source.title, content, header }];
         });
 
         if (withContent.length === 0) {
             throw APIError.BadRequest("Selected sources have no extracted content yet.");
         }
 
+        const headerChars = withContent.reduce((sum, source) => sum + source.header.length, 0);
         const budgets = allocateBudgets(
             withContent.map((source) => source.content.length),
-            ARTIFACT_MAX_CONTEXT_CHARS - CONTEXT_OVERHEAD_CHARS,
+            ARTIFACT_MAX_CONTEXT_CHARS - CONTEXT_OVERHEAD_CHARS - headerChars,
         );
 
         const fitted = await Promise.all(
             withContent.map(async (source, index) => ({
                 title: source.title,
                 content:
-                    source.content.length <= budgets[index]
+                    source.header +
+                    (source.content.length <= budgets[index]
                         ? source.content
-                        : await condenseSource(source.title, source.content, budgets[index]),
+                        : await condenseSource(source.title, source.content, budgets[index])),
             })),
         );
 
@@ -368,6 +429,16 @@ export class ArtifactGenerationService {
                     prompt: ARTIFACT_PROMPTS.REPORT(sourceText),
                 });
                 return result.output;
+            }
+            case "WIKI": {
+                const result = await generateText({
+                    model: openai(CHAT_MODEL),
+                    system,
+                    telemetry,
+                    output: Output.object({ schema: wikiSchema }),
+                    prompt: ARTIFACT_PROMPTS.WIKI(sourceText),
+                });
+                return sanitizeWiki(result.output);
             }
             default:
                 throw APIError.BadRequest(`Unsupported artifact type: ${String(type)}`);
