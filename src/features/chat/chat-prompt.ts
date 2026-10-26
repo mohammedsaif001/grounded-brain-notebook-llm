@@ -103,6 +103,9 @@ export class ChatPrompt {
                     `title="${escapeDelimiters(chunk.sourceTitle).replace(/"/g, "'")}"`,
                     `type="${chunk.sourceType}"`,
                     ...(chunk.page ? [`page="${chunk.page}"`] : []),
+                    ...(chunk.path
+                        ? [`path="${escapeDelimiters(chunk.path).replace(/"/g, "'")}"`]
+                        : []),
                 ].join(" ");
                 return `<source ${attributes}>\n${escapeDelimiters(chunk.text)}\n</source>`;
             })

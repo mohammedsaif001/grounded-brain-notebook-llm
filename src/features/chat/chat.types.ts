@@ -6,6 +6,8 @@ export type RetrievedChunk = {
     chunkId: string;
     chunkIndex: number;
     page?: number;
+    /** File path within a repository (GITHUB sources). */
+    path?: string;
     text: string;
     score: number;
 };

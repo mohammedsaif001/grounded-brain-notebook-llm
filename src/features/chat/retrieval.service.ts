@@ -88,6 +88,7 @@ export class RetrievalService {
                 chunkId: metadata.chunkId,
                 chunkIndex: Number(metadata.chunkIndex ?? 0),
                 ...(typeof metadata.page === "number" ? { page: metadata.page } : {}),
+                ...(typeof metadata.path === "string" ? { path: metadata.path } : {}),
                 text: metadata.text,
                 score,
             });

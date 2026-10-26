@@ -49,6 +49,7 @@ export const CHAT_GROUNDED_RULES = [
     "If the sources are insufficient, say so clearly.",
     "Cite sources inline using [1], [2], etc. matching the source ids. Only cite a source if it supports the claim.",
     "Keep answers concise, accurate, and educational.",
+    "A <source> with a path attribute is a file from a code repository: name the file path when you refer to it, quote code in fenced blocks, and never invent files or functions that are not in the sources.",
 ];
 
 /**
@@ -172,6 +173,15 @@ export const ARTIFACT_PROMPTS = {
         `Create a multiple-choice quiz with explanations. correctIndex is the 0-based index of the correct option. Source material:\n\n${sourceText}`,
     MINDMAP: (sourceText: string) =>
         `Create a mind map as nodes and edges. Use a central topic node and branch out logically. Every edge source and target must be an existing node id. Source material:\n\n${sourceText}`,
+    WIKI: (sourceText: string) =>
+        `Write a developer wiki for the repository below. Fill every field using only the repository content:
+- overview: what the project does and who it is for (markdown, 1-3 paragraphs).
+- techStack: languages, frameworks and services actually used, each with its purpose.
+- architecture: how the code is organised and how a request or data flows through it (markdown).
+- diagram: a Mermaid flowchart (start with "flowchart TD") of the main components and how they connect. Raw Mermaid only, no code fences; quote node labels that contain spaces or punctuation.
+- modules: the main directories or components, each with its path, what it does, and its key files. Use real paths from the file tree.
+- gettingStarted: how to install, configure and run it, from the README, manifests and scripts (markdown). Say so if the repository does not document this.
+Repository:\n\n${sourceText}`,
     REPORT: (sourceText: string) =>
         `Write a structured long-form report with sections and a full markdown version from:\n\n${sourceText}`,
 };

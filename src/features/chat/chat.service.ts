@@ -84,6 +84,7 @@ export class ChatService {
                           chunkId: chunk.chunkId,
                           chunkIndex: chunk.chunkIndex,
                           page: chunk.page,
+                          path: chunk.path,
                           excerpt: chunk.text.slice(0, 280),
                           score: chunk.score,
                       },
