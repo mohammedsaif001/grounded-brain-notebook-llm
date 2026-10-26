@@ -22,6 +22,8 @@ export type VectorMetadata = {
     sourceType: string;
     text: string;
     page?: number;
+    /** File path within a repository (GITHUB sources). */
+    path?: string;
 };
 
 /** Singleton Pinecone connection that creates the index on first use. */

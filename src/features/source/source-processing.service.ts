@@ -17,6 +17,7 @@ import type { PineconeRecord } from "@pinecone-database/pinecone";
 import type { Prisma } from "../../generated/prisma/client.js";
 import { TextChunker } from "./ingestion/chunking.js";
 import { EmbeddingClient } from "../../shared/ai/embeddings.js";
+import { GithubRepoClient } from "./ingestion/github.js";
 import { PdfExtractor } from "./ingestion/pdf.js";
 import type { VectorMetadata } from "../../config/pinecone.js";
 import { SourceChunkRepository, type SourceChunkRecord } from "./source-chunk.repository.js";
@@ -39,6 +40,17 @@ export type SourceMetadata = {
     chunkCount?: number;
     pageCount?: number;
     indexedAt?: string;
+    /** GITHUB sources: where the repository was read from. */
+    owner?: string;
+    repo?: string;
+    branch?: string;
+    commitSha?: string;
+    description?: string | null;
+    /** GITHUB sources: files that were read, with their size in characters. */
+    files?: { path: string; size: number }[];
+    totalFiles?: number;
+    truncated?: boolean;
+    syncedAt?: string;
 };
 
 /**
@@ -92,10 +104,12 @@ export class SourceProcessingService {
      * 1. **PDF** — downloads from Cloudinary and extracts per page, so chunks keep page
      *    numbers for citations. The text saved at upload has no page boundaries, so it is
      *    only used when the PDF has no `fileUrl`.
-     * 2. **Text already in DB** — `source.content` (TEXT, website scrape, YouTube transcript, etc.)
+     * 2. **GitHub repository** — `source.content` holds the packed files; they are unpacked so
+     *    chunks keep file paths for citations.
+     * 3. **Text already in DB** — `source.content` (TEXT, website scrape, YouTube transcript, etc.)
      *
      * @param source - Source to read text from
-     * @returns Full text and, for PDFs, the page count and per-page text
+     * @returns Full text and, for PDFs, the page count and per-page text; for repositories, the files
      * @throws If the source has no content at all
      */
     private static async extractText(source: SourceRecord) {
@@ -112,12 +126,22 @@ export class SourceProcessingService {
                 text: extracted.text,
                 pageCount: extracted.pageCount,
                 pages: extracted.pages,
+                files: undefined,
             };
         }
 
         const text = source.content?.trim();
+
+        if (text && source.type === "GITHUB") {
+            const files = GithubRepoClient.unpack(text);
+            if (files.length === 0) {
+                throw new Error(`Source ${source.id} has no repository files`);
+            }
+            return { text, pageCount: undefined, pages: undefined, files };
+        }
+
         if (text) {
-            return { text, pageCount: undefined, pages: undefined };
+            return { text, pageCount: undefined, pages: undefined, files: undefined };
         }
 
         throw new Error(`Source ${source.id} has no extractable content`);
@@ -151,9 +175,11 @@ export class SourceProcessingService {
 
         await SourceChunkRepository.deleteAllBySourceId(sourceId);
 
-        const chunks = extracted.pages?.length
-            ? await TextChunker.chunkPages(extracted.pages)
-            : await TextChunker.chunkText(extracted.text);
+        const chunks = extracted.files?.length
+            ? await TextChunker.chunkFiles(extracted.files)
+            : extracted.pages?.length
+              ? await TextChunker.chunkPages(extracted.pages)
+              : await TextChunker.chunkText(extracted.text);
 
         if (chunks.length === 0) {
             throw new Error("No chunks were generated from source content");
@@ -208,6 +234,9 @@ export class SourceProcessingService {
                         ...(typeof chunkMetadata.page === "number"
                             ? { page: chunkMetadata.page }
                             : {}),
+                        ...(typeof chunkMetadata.path === "string"
+                            ? { path: chunkMetadata.path }
+                            : {}),
                     },
                 });
             });
@@ -220,7 +249,7 @@ export class SourceProcessingService {
      * Pipeline step 2: embed the source's chunks, replace its vectors, and mark it `READY`.
      *
      * Pinecone metadata includes enough context for retrieval without re-querying Postgres:
-     * `sourceTitle`, `sourceType`, chunk `text` (truncated to 35k chars), and optional `page`.
+     * `sourceTitle`, `sourceType`, chunk `text` (truncated to 35k chars), and optional `page` / `path`.
      *
      * @param sourceId - Source to index
      * @returns Updated source, or `null` if the source was deleted mid-run

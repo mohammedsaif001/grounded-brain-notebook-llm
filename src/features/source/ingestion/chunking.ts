@@ -84,4 +84,35 @@ export class TextChunker {
 
         return chunks;
     }
+
+    /**
+     * Chunks repository files while preserving file paths.
+     *
+     * Chunks never span two files, every chunk gets `metadata.path`, and `index` is
+     * numbered globally across files. Each chunk starts with a `File: <path>` line so
+     * the path is part of the embedded text and "where is X handled?" questions match.
+     *
+     * @param files - Repository files, e.g. from `GithubRepoClient`
+     * @returns Chunks tagged with the path of their file
+     */
+    static async chunkFiles(files: { path: string; content: string }[]): Promise<TextChunk[]> {
+        const chunks: TextChunk[] = [];
+
+        for (const file of files) {
+            const fileChunks = await this.chunkText(file.content, { path: file.path });
+
+            for (const chunk of fileChunks) {
+                const content = `File: ${file.path}
+${chunk.content}`;
+                chunks.push({
+                    ...chunk,
+                    index: chunks.length,
+                    content,
+                    tokenCount: tokenizer.encode(content).length,
+                });
+            }
+        }
+
+        return chunks;
+    }
 }
