@@ -18,6 +18,7 @@ Every diagram in the docs exists in two forms:
 | [`request-lifecycle.eraser`](request-lifecycle.eraser)             | Flow Chart          | `request-lifecycle.png`        | ARCHITECTURE §6                                     |
 | [`auth-flow.eraser`](auth-flow.eraser)                             | Sequence            | `auth-flow.png`                | ARCHITECTURE §7                                     |
 | [`source-pipeline.eraser`](source-pipeline.eraser)                 | Sequence            | `source-pipeline.png`          | ARCHITECTURE §8.2                                   |
+| [`github-repo.eraser`](github-repo.eraser)                         | Sequence            | `github-repo.png`              | ARCHITECTURE §8.2 (Mermaid only until exported)     |
 | [`chat-flow.eraser`](chat-flow.eraser)                             | Sequence            | `chat-flow.png`                | ARCHITECTURE §8.3                                   |
 | [`conversation-summary.eraser`](conversation-summary.eraser)       | Flow Chart          | `conversation-summary.png`     | ARCHITECTURE §8.4                                   |
 | [`artifact-generation.eraser`](artifact-generation.eraser)         | Sequence            | `artifact-generation.png`      | ARCHITECTURE §8.6                                   |

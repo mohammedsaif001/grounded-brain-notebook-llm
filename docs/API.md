@@ -50,30 +50,31 @@ What the collection does for you:
 
 ### Collection variables
 
-| Variable                               | Meaning                                                                                    |
-| -------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `baseUrl`                              | API base URL, default `http://localhost:8080`                                              |
-| `origin`                               | Must match the server's `CLIENT_URL`, default `http://localhost:3000`                      |
-| `emailA`, `emailB`, `password`         | Test users (emails generated per run)                                                      |
-| `workspaceId`                          | Set by **Create workspace**                                                                |
-| `sourceId`, `sourceId2`, `pdfSourceId` | Set by the source create/upload requests                                                   |
-| `conversationId`, `conversationId2`    | Set by **Send first message** (from `X-Conversation-Id`) and **Create empty conversation** |
-| `memoryId`                             | Set by **Create memory**                                                                   |
-| `artifactId`                           | Set by the artifact create requests                                                        |
-| `pollCount`                            | Internal counter for the polling requests                                                  |
+| Variable                                                 | Meaning                                                                                    |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `baseUrl`                                                | API base URL, default `http://localhost:8080`                                              |
+| `origin`                                                 | Must match the server's `CLIENT_URL`, default `http://localhost:3000`                      |
+| `emailA`, `emailB`, `password`                           | Test users (emails generated per run)                                                      |
+| `workspaceId`                                            | Set by **Create workspace**                                                                |
+| `sourceId`, `sourceId2`, `pdfSourceId`, `githubSourceId` | Set by the source create/upload requests                                                   |
+| `conversationId`, `conversationId2`                      | Set by **Send first message** (from `X-Conversation-Id`) and **Create empty conversation** |
+| `memoryId`                                               | Set by **Create memory**                                                                   |
+| `artifactId`, `wikiArtifactId`                           | Set by the artifact create requests                                                        |
+| `pollCount`                                              | Internal counter for the polling requests                                                  |
 
 ### Optional integrations
 
 Some requests need extra API keys in the server's `.env`. Without them the server answers **503
 `SERVICE_UNAVAILABLE`** and the rest keeps working.
 
-| Requests                    | Needs                                                   |
-| --------------------------- | ------------------------------------------------------- |
-| Upload PDF                  | `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_UPLOAD_PRESET`     |
-| Import website              | `FIRECRAWL_API_KEY`                                     |
-| Send with web search        | `TAVILY_API_KEY` (otherwise web search is silently off) |
-| Memory create/update/delete | `MEM0_API_KEY`                                          |
-| Chat and artifacts          | `OPENAI_API_KEY`, `PINECONE_API_KEY` (always required)  |
+| Requests                    | Needs                                                                                                                    |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Upload PDF                  | `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_UPLOAD_PRESET`                                                                      |
+| Import website              | `FIRECRAWL_API_KEY`                                                                                                      |
+| Import GitHub repo          | nothing for public repos; `GITHUB_TOKEN` for private repos and a higher rate limit (otherwise **503** when rate-limited) |
+| Send with web search        | `TAVILY_API_KEY` (otherwise web search is silently off)                                                                  |
+| Memory create/update/delete | `MEM0_API_KEY`                                                                                                           |
+| Chat and artifacts          | `OPENAI_API_KEY`, `PINECONE_API_KEY` (always required)                                                                   |
 
 ---
 
@@ -388,7 +389,9 @@ private repos and a higher rate limit.
 
 `metadata` holds `owner`, `repo`, `branch`, `commitSha`, `totalFiles`, `truncated` and the list
 of indexed `files`. **404** repo not found / private, **409** already in the workspace,
-**503** GitHub rate limit or bad server token.
+**503** GitHub rate limit or bad server token. Collection requests: **Import GitHub repo**,
+**Wait until GitHub repo is READY**, **List GitHub repo files**, **Sync GitHub repo**,
+**[409] Import the same repo again**, **[400] Bad repo string**, **[400] Sync a non-GitHub source**.
 
 ### Sync a repository: `POST .../sources/:sourceId/sync`
 

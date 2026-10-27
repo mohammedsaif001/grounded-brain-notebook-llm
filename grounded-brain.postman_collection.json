@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Grounded Brain API",
-    "description": "\nBackend API for **Grounded Brain**, a NotebookLM-style app. Users create **workspaces**, add **sources** (text, markdown, PDF, website, YouTube, web results), **chat** with them using RAG with citations, generate **learning artifacts** (summary, takeaways, flashcards, quiz, mind map, report), and keep long-term **memories**.\n\n## How to use this collection\n\n1. Start everything locally: `npm run dev` (Postgres, API on :8080, Inngest dev server, Prisma Studio).\n2. **Run the whole collection** (Runner → Run). The folders go in order and build on each other: sign up → workspace → sources → chat → memory → artifacts → isolation checks → cleanup.\n3. Or send requests one by one. IDs are saved into collection variables as you go.\n\n\"Wait until READY\" requests poll in the **Collection Runner** only. When you send them by hand, re-send until the status is `READY`. Background jobs need the Inngest dev server, which `npm run dev` starts.\n\n## Auth\n\nCookie sessions via Better Auth. **Sign up** or **Sign in** sets the session cookie, and Postman sends it on every later request automatically. A collection-level script adds the `Origin` header that Better Auth requires.\n\nEach run signs up a fresh user (`user-<timestamp>@test.local`), so the collection can be re-run without conflicts.\n\n## Responses\n\nEvery JSON response uses one envelope:\n\n```json\n{ \"success\": true, \"data\": { ... }, \"message\": \"optional\" }\n{ \"success\": false, \"error\": { \"code\": \"NOT_FOUND\", \"message\": \"Workspace not found\", \"details\": {} } }\n```\n\n- Deletes return **204** with no body. Async work (reprocess) returns **202**.\n- Error codes: `BAD_REQUEST`, `VALIDATION_ERROR` (with field `details`), `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `PAYLOAD_TOO_LARGE`, `TOO_MANY_REQUESTS`, `INTERNAL_SERVER_ERROR`, `SERVICE_UNAVAILABLE`.\n- **503** means an optional integration (Cloudinary, Firecrawl, Mem0, Tavily) is not configured on the server.\n- **Exception:** `POST /chat` streams an AI SDK UI message stream (server-sent events), not JSON.\n- Every response has an `X-Request-Id` header. Send your own to correlate with server logs.\n\n## Rate limits\n\n300 requests / 15 min per IP on `/api`; 20 / min per user for chat and artifact creation; 30 / 10 min per user for uploads, imports and reprocessing. Over the limit → **429** `TOO_MANY_REQUESTS`.\n\n## Variables\n\n| Variable | Meaning |\n|---|---|\n| `baseUrl` | API base URL (default `http://localhost:8080`) |\n| `origin` | Must match the server's `CLIENT_URL` (default `http://localhost:3000`) |\n| `emailA` / `emailB` / `password` | Test users (emails are generated per run) |\n| `workspaceId`, `sourceId`, `sourceId2`, `conversationId`, `memoryId`, `artifactId` | Saved automatically by the requests that create them |\n",
+    "description": "\nBackend API for **Grounded Brain**, a NotebookLM-style app. Users create **workspaces**, add **sources** (text, markdown, PDF, website, YouTube, GitHub repositories, web results), **chat** with them using RAG with citations, generate **learning artifacts** (summary, takeaways, flashcards, quiz, mind map, report, repo wiki), and keep long-term **memories**.\n\n## How to use this collection\n\n1. Start everything locally: `npm run dev` (Postgres, API on :8080, Inngest dev server, Prisma Studio).\n2. **Run the whole collection** (Runner → Run). The folders go in order and build on each other: sign up → workspace → sources → chat → memory → artifacts → isolation checks → cleanup.\n3. Or send requests one by one. IDs are saved into collection variables as you go.\n\n\"Wait until READY\" requests poll in the **Collection Runner** only. When you send them by hand, re-send until the status is `READY`. Background jobs need the Inngest dev server, which `npm run dev` starts.\n\n## Auth\n\nCookie sessions via Better Auth. **Sign up** or **Sign in** sets the session cookie, and Postman sends it on every later request automatically. A collection-level script adds the `Origin` header that Better Auth requires.\n\nEach run signs up a fresh user (`user-<timestamp>@test.local`), so the collection can be re-run without conflicts.\n\n## Responses\n\nEvery JSON response uses one envelope:\n\n```json\n{ \"success\": true, \"data\": { ... }, \"message\": \"optional\" }\n{ \"success\": false, \"error\": { \"code\": \"NOT_FOUND\", \"message\": \"Workspace not found\", \"details\": {} } }\n```\n\n- Deletes return **204** with no body. Async work (reprocess) returns **202**.\n- Error codes: `BAD_REQUEST`, `VALIDATION_ERROR` (with field `details`), `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `PAYLOAD_TOO_LARGE`, `TOO_MANY_REQUESTS`, `INTERNAL_SERVER_ERROR`, `SERVICE_UNAVAILABLE`.\n- **503** means an optional integration (Cloudinary, Firecrawl, Mem0, Tavily) is not configured on the server, or GitHub rate-limited the server (set `GITHUB_TOKEN` to raise the limit).\n- **Exception:** `POST /chat` streams an AI SDK UI message stream (server-sent events), not JSON.\n- Every response has an `X-Request-Id` header. Send your own to correlate with server logs.\n\n## Rate limits\n\n300 requests / 15 min per IP on `/api`; 20 / min per user for chat and artifact creation; 30 / 10 min per user for uploads, imports and reprocessing. Over the limit → **429** `TOO_MANY_REQUESTS`.\n\n## Variables\n\n| Variable | Meaning |\n|---|---|\n| `baseUrl` | API base URL (default `http://localhost:8080`) |\n| `origin` | Must match the server's `CLIENT_URL` (default `http://localhost:3000`) |\n| `emailA` / `emailB` / `password` | Test users (emails are generated per run) |\n| `workspaceId`, `sourceId`, `sourceId2`, `githubSourceId`, `conversationId`, `memoryId`, `artifactId`, `wikiArtifactId` | Saved automatically by the requests that create them |\n",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "event": [
@@ -85,6 +85,14 @@
     {
       "key": "pollCount",
       "value": "0"
+    },
+    {
+      "key": "githubSourceId",
+      "value": ""
+    },
+    {
+      "key": "wikiArtifactId",
+      "value": ""
     }
   ],
   "item": [
@@ -1166,7 +1174,7 @@
     },
     {
       "name": "04 · Sources: uploads & imports",
-      "description": "Need the optional integrations: **Cloudinary** (PDF), **Firecrawl** (website). They return **503** when not configured. Each counts against the ingestion rate limit (30 / 10 min).",
+      "description": "Need the optional integrations: **Cloudinary** (PDF), **Firecrawl** (website). GitHub imports work without a token for public repos (set `GITHUB_TOKEN` on the server for private repos and a higher rate limit). They return **503** when not configured. Each counts against the ingestion rate limit (30 / 10 min).",
       "item": [
         {
           "name": "Upload PDF",
@@ -1316,6 +1324,318 @@
               ]
             },
             "description": "Imports the video transcript (the video must have captions). Body: `url`, optional `title`."
+          }
+        },
+        {
+          "name": "Import GitHub repo",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201 (or 503 if GitHub rate limits the server)\", () => pm.expect(pm.response.code).to.be.oneOf([201, 503]));",
+                  "if (pm.response.code === 201) {",
+                  "    const source = pm.response.json().data;",
+                  "    pm.collectionVariables.set(\"githubSourceId\", source.id);",
+                  "    pm.test(\"is a GITHUB source starting PENDING\", () => {",
+                  "        pm.expect(source.type).to.eql(\"GITHUB\");",
+                  "        pm.expect(source.status).to.eql(\"PENDING\");",
+                  "        pm.expect(source.metadata.files.length).to.be.above(0);",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/import/github",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "sources",
+                "import",
+                "github"
+              ]
+            },
+            "description": "Reads a GitHub repository into ONE source; chunks and citations carry file paths. Body: `url` (`owner/repo` or a GitHub URL), optional `branch` and `title`. Public repos work without a token; set `GITHUB_TOKEN` on the server for private repos.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"octocat/Spoon-Knife\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Wait until GitHub repo is READY",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(() => {",
+                  "    if (!pm.collectionVariables.get(\"githubSourceId\")) { pm.test(\"skipped: GitHub import was not available\", () => {}); return; }",
+                  "    pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "    ",
+                  "    const status = pm.response.json().data?.status;",
+                  "    const tries = Number(pm.collectionVariables.get(\"pollCount\") || 0);",
+                  "    if ((status === \"PENDING\" || status === \"PROCESSING\") && tries < 45) {",
+                  "        pm.collectionVariables.set(\"pollCount\", tries + 1);",
+                  "        console.log(\"status \" + status + \", polling again (\" + (tries + 1) + \")\");",
+                  "        setTimeout(() => {}, 2000);",
+                  "        (pm.execution && pm.execution.setNextRequest ? pm.execution.setNextRequest : postman.setNextRequest)(pm.info.requestName);",
+                  "    } else {",
+                  "        pm.collectionVariables.set(\"pollCount\", 0);",
+                  "        pm.test(\"reached READY (requires the Inngest dev server)\", () => pm.expect(status).to.eql(\"READY\"));",
+                  "    }",
+                  "})();"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/{{githubSourceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "sources",
+                "{{githubSourceId}}"
+              ]
+            },
+            "description": "In the Collection Runner this repeats every 2s until the repository is indexed (`READY`). Skipped if the import returned 503."
+          }
+        },
+        {
+          "name": "List GitHub repo files",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(() => {",
+                  "    if (!pm.collectionVariables.get(\"githubSourceId\")) { pm.test(\"skipped: GitHub import was not available\", () => {}); return; }",
+                  "    pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "    const data = pm.response.json().data;",
+                  "    pm.test(\"lists files with chunk counts\", () => {",
+                  "        pm.expect(data.files.length).to.be.above(0);",
+                  "        pm.expect(data.files[0]).to.have.property(\"chunkCount\");",
+                  "        pm.expect(data.commitSha).to.be.a(\"string\");",
+                  "    });",
+                  "})();"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/{{githubSourceId}}/files",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "sources",
+                "{{githubSourceId}}",
+                "files"
+              ]
+            },
+            "description": "Files indexed from a GITHUB source: `path`, `size` and `chunkCount`, plus repo, branch and commit."
+          }
+        },
+        {
+          "name": "Sync GitHub repo",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(() => {",
+                  "    if (!pm.collectionVariables.get(\"githubSourceId\")) { pm.test(\"skipped: GitHub import was not available\", () => {}); return; }",
+                  "    pm.test(\"status 202\", () => pm.response.to.have.status(202));",
+                  "    pm.test(\"nothing changed since import\", () => pm.expect(pm.response.json().data.changed).to.eql(false));",
+                  "})();"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/{{githubSourceId}}/sync",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "sources",
+                "{{githubSourceId}}",
+                "sync"
+              ]
+            },
+            "description": "Checks the branch's latest commit with one API call. `changed: false` when unchanged; otherwise the repo is re-read and re-indexed (`changed: true`)."
+          }
+        },
+        {
+          "name": "[409] Import the same repo again",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(() => {",
+                  "    if (!pm.collectionVariables.get(\"githubSourceId\")) { pm.test(\"skipped: GitHub import was not available\", () => {}); return; }",
+                  "    pm.test(\"status 409\", () => pm.response.to.have.status(409));",
+                  "})();"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/import/github",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "sources",
+                "import",
+                "github"
+              ]
+            },
+            "description": "A repository can be in a workspace only once; use sync to update it.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"https://github.com/octocat/Spoon-Knife\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "[400] Bad repo string",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/import/github",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "sources",
+                "import",
+                "github"
+              ]
+            },
+            "description": "Must be `owner/repo` or a GitHub URL.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"not-a-repo\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "[400] Sync a non-GitHub source",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/{{sourceId}}/sync",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "sources",
+                "{{sourceId}}",
+                "sync"
+              ]
+            },
+            "description": "Only GITHUB sources can be synced."
           }
         },
         {
@@ -2055,7 +2375,7 @@
     },
     {
       "name": "08 · Artifacts",
-      "description": "Learning material generated from the workspace's READY sources by a background job. Creating one returns it `PENDING`; poll until `READY` (or `FAILED`).\n\nBody: `type` (`SUMMARY` | `TAKEAWAYS` | `FLASHCARDS` | `QUIZ` | `MINDMAP` | `REPORT`), optional `title`, optional `sourceIds` (defaults to all READY sources). Returns **400** if there are no READY sources.\n\n`content` by type: SUMMARY `{ markdown }` · TAKEAWAYS `{ items[] }` · FLASHCARDS `{ cards[{ front, back }] }` · QUIZ `{ questions[{ question, options[], correctIndex, explanation }] }` · MINDMAP `{ nodes[{ id, label }], edges[{ id, source, target }] }` · REPORT `{ markdown, sections[{ title, content }] }`.",
+      "description": "Learning material generated from the workspace's READY sources by a background job. Creating one returns it `PENDING`; poll until `READY` (or `FAILED`).\n\nBody: `type` (`SUMMARY` | `TAKEAWAYS` | `FLASHCARDS` | `QUIZ` | `MINDMAP` | `REPORT` | `WIKI`), optional `title`, optional `sourceIds` (defaults to all READY sources). Returns **400** if there are no READY sources.\n\n`content` by type: SUMMARY `{ markdown }` · TAKEAWAYS `{ items[] }` · FLASHCARDS `{ cards[{ front, back }] }` · QUIZ `{ questions[{ question, options[], correctIndex, explanation }] }` · MINDMAP `{ nodes[{ id, label }], edges[{ id, source, target }] }` · REPORT `{ markdown, sections[{ title, content }] }`.",
       "item": [
         {
           "name": "Create SUMMARY",
@@ -2329,6 +2649,56 @@
           }
         },
         {
+          "name": "Create WIKI (GitHub repo)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get(\"githubSourceId\")) {",
+                  "    pm.test(\"skipped: no GitHub source (import was unavailable)\", () => {});",
+                  "} else {",
+                  "    pm.test(\"status 201\", () => pm.response.to.have.status(201));",
+                  "    pm.collectionVariables.set(\"wikiArtifactId\", pm.response.json().data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/artifacts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "artifacts"
+              ]
+            },
+            "description": "Queues a developer wiki for a GitHub source (400 if the workspace has no READY GitHub repo). `content` when READY: `{ overview, techStack: [{ name, purpose }], architecture, diagram (raw Mermaid), modules: [{ name, path, description, keyFiles }], gettingStarted }`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"WIKI\",\n  \"sourceIds\": [\n    \"{{githubSourceId}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
           "name": "Wait until artifact is READY",
           "event": [
             {
@@ -2370,6 +2740,53 @@
               ]
             },
             "description": "Polls in the Collection Runner (every 2s, max ~90s)."
+          }
+        },
+        {
+          "name": "Wait until WIKI is READY",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(() => {",
+                  "    if (!pm.collectionVariables.get(\"wikiArtifactId\")) { pm.test(\"skipped: no wiki requested\", () => {}); return; }",
+                  "    pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "    ",
+                  "    const status = pm.response.json().data?.status;",
+                  "    const tries = Number(pm.collectionVariables.get(\"pollCount\") || 0);",
+                  "    if ((status === \"PENDING\" || status === \"PROCESSING\") && tries < 45) {",
+                  "        pm.collectionVariables.set(\"pollCount\", tries + 1);",
+                  "        console.log(\"status \" + status + \", polling again (\" + (tries + 1) + \")\");",
+                  "        setTimeout(() => {}, 2000);",
+                  "        (pm.execution && pm.execution.setNextRequest ? pm.execution.setNextRequest : postman.setNextRequest)(pm.info.requestName);",
+                  "    } else {",
+                  "        pm.collectionVariables.set(\"pollCount\", 0);",
+                  "        pm.test(\"reached READY (requires the Inngest dev server)\", () => pm.expect(status).to.eql(\"READY\"));",
+                  "    }",
+                  "})();"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/artifacts/{{wikiArtifactId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "artifacts",
+                "{{wikiArtifactId}}"
+              ]
+            },
+            "description": "Polls in the Collection Runner (every 2s, max ~90s). Skipped if no GitHub source exists."
           }
         },
         {

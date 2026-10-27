@@ -83,7 +83,7 @@ flowchart TB
     subgraph INNGEST_BOX["⚡ Background jobs (Inngest)"]
         direction LR
         TRIGGERS["<b>Event triggers</b><br/>• source/created<br/>• artifact/generate<br/>• conversation/summarize<br/>• source/deleted<br/>• workspace/deleted"]:::jobs
-        FUNCS["<b>Functions</b> <i>(served at /api/inngest)</i><br/>• process-source (extract, chunk, embed, store)<br/>• generate-artifact (summary, flashcards, quiz, mind map, ...)<br/>• summarize-conversation (rolling summary)"]:::jobs
+        FUNCS["<b>Functions</b> <i>(served at /api/inngest)</i><br/>• process-source (extract, chunk, embed, store)<br/>• generate-artifact (summary, flashcards, quiz, mind map, repo wiki, ...)<br/>• summarize-conversation (rolling summary)"]:::jobs
         TRIGGERS -.-> FUNCS
     end
 
@@ -119,6 +119,7 @@ flowchart TB
         TAVILY["🔍 <b>Tavily</b><br/>Web search API (chat tool)"]:::ext
         FIRE["🔥 <b>Firecrawl</b><br/>Website crawl (to markdown)"]:::ext
         YT["▶️ <b>YouTube</b><br/>Transcripts (video transcripts)"]:::ext
+        GH["🐙 <b>GitHub</b><br/>Repository files (for repo chat)"]:::ext
         LANGFUSE["📊 <b>Langfuse</b><br/>LLM tracing (OpenTelemetry)"]:::ext
         AXIOM["📑 <b>Axiom</b><br/>Log storage (optional)"]:::ext
     end
@@ -142,6 +143,7 @@ flowchart TB
     SERVICES -- "Web search (chat tool)" --> TAVILY
     SERVICES -- "Crawl website (for sources)" --> FIRE
     SERVICES -- "Fetch transcripts (for sources)" --> YT
+    SERVICES -- "Read repo files (for sources)" --> GH
 
     %% Observability
     SERVICES -. "OpenTelemetry spans (tracing)" .-> LANGFUSE
@@ -419,7 +421,7 @@ Each feature folder uses the same file names:
 ```mermaid
 flowchart LR
     R["routes<br/>URL + middleware"] --> C["controller<br/>validate + respond"] --> S["service<br/>rules + orchestration"] --> RP["repository<br/>queries"] --> DB[("Postgres / Pinecone / Mem0")]
-    S --> X["external APIs<br/>OpenAI · Firecrawl · Tavily · Cloudinary"]
+    S --> X["external APIs<br/>OpenAI · Firecrawl · Tavily · Cloudinary · GitHub"]
     S --> E["EventPublisher<br/>→ Inngest"]
 ```
 
@@ -600,7 +602,7 @@ sequenceDiagram
     participant OAI as OpenAI (embeddings)
     participant PC as Pinecone
 
-    C->>API: POST /sources (or /upload, /import/*)
+    C->>API: POST /sources (or /upload, /import/*, /:id/sync)
     API->>PG: INSERT source (PENDING)
     API->>IN: send source/created {sourceId, workspaceId}
     API-->>C: 201 source (PENDING)
@@ -611,11 +613,13 @@ sequenceDiagram
     alt PDF with fileUrl
         JOB->>CL: download PDF (signed URL fallback on 401)
         JOB->>JOB: unpdf → text per page
+    else GITHUB source
+        JOB->>PG: read source.content, unpack into files
     else text already in DB
         JOB->>PG: read source.content
     end
     JOB->>PG: save full text, delete old chunks
-    JOB->>JOB: LangChain splitter → ~1000-char chunks (PDF: per page)
+    JOB->>JOB: LangChain splitter → ~1000-char chunks (PDF: per page, repo: per file)
     JOB->>PG: INSERT source_chunk rows
     Note over JOB: step "embed-and-index"
     JOB->>OAI: embed chunks (batches of 50, via shared queue)
@@ -649,6 +653,57 @@ Details worth knowing:
   it removes the vectors it just wrote.
 - **Concurrency key `sourceId`, limit 1:** a reprocess request waits for the active run instead of racing it.
 - **Cancellation:** `source/deleted` or `workspace/deleted` cancels a running job.
+
+#### GitHub repositories
+
+`POST /import/github` turns a repository into **one** `GITHUB` source, so it is searched and
+cited together with the workspace's PDFs, websites and notes.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant API as SourceService
+    participant GH as GitHub (Octokit)
+    participant PG as Postgres
+    participant IN as Inngest
+    participant PC as Pinecone
+
+    C->>API: POST /sources/import/github {url, branch?}
+    API->>API: parseRepo, reject if already in workspace (409)
+    API->>GH: repo info, branch head commit, file tree, file blobs (8 in parallel)
+    API->>PG: INSERT source (GITHUB, PENDING) with packed files + metadata (commitSha, files)
+    API->>IN: send source/created
+    API-->>C: 201 source (PENDING)
+    Note over IN,PC: same process-source job: unpack files, chunk per file (metadata.path), embed, index
+    C->>API: POST /sources/:id/sync
+    API->>GH: branch head commit (one call)
+    alt commit unchanged and READY
+        API-->>C: 202 changed false
+    else new commits
+        API->>GH: re-read files
+        API->>PG: replace content, status PENDING
+        API->>IN: send source/created
+        API-->>C: 202 changed true
+    end
+```
+
+- **One source per repo, files packed into `content`.** Each file is preceded by a
+  `===== FILE: path =====` line; the job unpacks them so chunks never span two files and carry
+  `metadata.path`. Each chunk's text also starts with `File: <path>`, so questions like "where is
+  auth handled?" match the file name.
+- **Limits** ([`ingestion/github.ts`](../src/features/source/ingestion/github.ts)): 200 files,
+  200 KB per file, 2 MB of text. README and manifests are read first, then shallow files, so
+  truncation drops the least useful ones; `metadata.truncated` and `totalFiles` report it.
+  Lockfiles, binaries, `node_modules`, `dist`, `.git` and similar are skipped.
+- **Citations:** the Pinecone record stores `path`, retrieval returns it, and chat shows it as
+  `path="..."` on the `<source>` block. The grounding rules tell the model to name the file and
+  quote code in fences.
+- **Sync** compares the branch head with `metadata.commitSha` (one API call). Old vectors keep
+  serving chat until the new index replaces them.
+- **Auth:** the server's optional `GITHUB_TOKEN` is used for every read. Without it only public
+  repos work, at GitHub's anonymous 60 requests per hour.
+- **Wiki:** a `WIKI` artifact built from this source; see [8.6](#86-learning-artifacts).
 
 #### Reprocessing and deleting
 
@@ -818,7 +873,7 @@ sequenceDiagram
     participant OAI as OpenAI
 
     C->>AS: POST /artifacts {type, title?, sourceIds?}
-    AS->>PG: verify ownership, resolve READY source ids (no content loaded)
+    AS->>PG: verify ownership, resolve READY source ids (WIKI: GITHUB only; no content loaded)
     AS->>PG: INSERT artifact (PENDING)
     AS->>IN: send artifact/generate
     AS-->>C: 201 artifact (PENDING)
@@ -828,7 +883,7 @@ sequenceDiagram
         JOB->>OAI: condense oversized sources (60k-char segments, 4 in parallel)
     end
     JOB->>OAI: generateText (structured output validated by Zod)
-    JOB->>JOB: sanitize (quiz answer indexes, mind map edges)
+    JOB->>JOB: sanitize (quiz answer indexes, mind map edges, wiki diagram)
     JOB->>PG: status READY + content (or FAILED + processingError)
     C->>AS: GET /artifacts/:id (polling)
 ```

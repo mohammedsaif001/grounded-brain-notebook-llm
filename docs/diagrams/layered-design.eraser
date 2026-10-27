@@ -9,7 +9,7 @@ Controller [icon: check-square, color: green, label: "controller\nvalidate (Zod)
 Service [icon: settings, color: green, label: "service\nrules + orchestration"]
 Repository [icon: layers, color: blue, label: "repository\nqueries"]
 Data stores [shape: cylinder, icon: database, color: blue, label: "Postgres / Pinecone / Mem0"]
-External APIs [icon: globe, color: orange, label: "OpenAI · Firecrawl · Tavily · Cloudinary"]
+External APIs [icon: globe, color: orange, label: "OpenAI · Firecrawl · Tavily · Cloudinary · GitHub"]
 EventPublisher [icon: zap, color: purple, label: "EventPublisher → Inngest"]
 
 Routes > Controller > Service > Repository > Data stores

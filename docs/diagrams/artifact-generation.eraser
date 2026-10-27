@@ -4,19 +4,19 @@ title Learning artifact generation
 autoNumber on
 
 Client [icon: monitor, color: gray] > ArtifactService [icon: nodejs, color: green]: POST /artifacts {type, title?, sourceIds?}
-ArtifactService > Postgres [icon: postgres, color: blue]: verify ownership, resolve READY source ids (no content loaded)
+ArtifactService > Postgres [icon: postgres, color: blue]: verify ownership, resolve READY source ids (WIKI: GITHUB sources only; no content loaded)
 ArtifactService > Postgres: INSERT artifact (PENDING)
 ArtifactService > Inngest [icon: zap, color: purple]: send artifact/generate
 ArtifactService --> Client: 201 artifact (PENDING)
 
 Inngest > GenerateArtifactJob [icon: book-open, color: purple]: run (2 retries, cancelled by workspace/deleted)
 activate GenerateArtifactJob
-GenerateArtifactJob > Postgres: status PROCESSING, load READY sources with content
+GenerateArtifactJob > Postgres: status PROCESSING, load READY sources with content (GITHUB: file tree prepended)
 opt [label: combined text > 120k chars] {
   GenerateArtifactJob > OpenAI [icon: openai, color: orange]: condense oversized sources (60k-char segments, 4 in parallel)
 }
 GenerateArtifactJob > OpenAI: generateText (structured output validated by Zod)
-GenerateArtifactJob > GenerateArtifactJob: sanitize (quiz answer indexes, mind map edges)
+GenerateArtifactJob > GenerateArtifactJob: sanitize (quiz answer indexes, mind map edges, wiki diagram fences)
 GenerateArtifactJob > Postgres: READY + content (or FAILED + processingError)
 deactivate GenerateArtifactJob
 

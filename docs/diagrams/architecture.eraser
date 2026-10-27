@@ -23,7 +23,7 @@ Express API [icon: nodejs, color: green] {
 Background jobs (Inngest) [icon: zap, color: purple] {
   Event Bus [icon: radio, label: "Event triggers:\nsource/created · artifact/generate · conversation/summarize · source/deleted · workspace/deleted"]
   process-source [icon: file-text, label: "process-source\n(extract, chunk, embed, store)"]
-  generate-artifact [icon: book-open, label: "generate-artifact\n(summary, flashcards, quiz, mind map, ...)"]
+  generate-artifact [icon: book-open, label: "generate-artifact\n(summary, flashcards, quiz, mind map, repo wiki, ...)"]
   summarize-conversation [icon: message-square, label: "summarize-conversation\n(rolling summary)"]
 }
 
@@ -41,6 +41,7 @@ AI and external services [color: orange] {
   Tavily [icon: search, label: "Tavily\nWeb search API (chat tool)"]
   Firecrawl [icon: globe, label: "Firecrawl\nWebsite crawl (to markdown)"]
   YouTube [icon: youtube, label: "YouTube\nTranscripts (video transcripts)"]
+  GitHub [icon: github, label: "GitHub\nRepository files (for repo chat)"]
   Langfuse [icon: activity, label: "Langfuse\nLLM tracing (OpenTelemetry)"]
   Axiom [icon: file-text, label: "Axiom\nLog storage (optional)"]
 }
@@ -60,6 +61,7 @@ OpenAI Queue > OpenAI
 Services > Tavily: Web search (chat tool)
 Services > Firecrawl: Crawl website (for sources)
 Services > YouTube: Fetch transcripts (for sources)
+Services > GitHub: Read repo files (for sources)
 Services > Event Bus: Send event (e.g. source/created)
 Event Bus > Inngest Endpoint: Invoke function (signed HTTP)
 Inngest Endpoint > process-source

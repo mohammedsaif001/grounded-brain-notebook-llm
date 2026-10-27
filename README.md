@@ -68,7 +68,8 @@ flowchart LR
 
 1. **Add a source.** The API stores it and fires an event. An **Inngest** job extracts the text,
    splits it into ~1000-character chunks with **LangChain**'s text splitter, embeds each chunk with
-   **OpenAI**, and stores the vectors in **Pinecone** (one namespace per workspace).
+   **OpenAI**, and stores the vectors in **Pinecone** (one namespace per workspace). A **GitHub
+   repository** is imported the same way as one source, chunked per file so answers can cite file paths.
 2. **Ask a question.** The API rewrites follow-ups into a standalone query, finds the most similar
    chunks in Pinecone and relevant memories in **Mem0**, and asks the model to answer **only from
    those chunks** and cite them. The answer streams back through the **Vercel AI SDK**.
@@ -135,7 +136,7 @@ flowchart TB
     subgraph INNGEST_BOX["⚡ Background jobs (Inngest)"]
         direction LR
         TRIGGERS["<b>Event triggers</b><br/>• source/created<br/>• artifact/generate<br/>• conversation/summarize<br/>• source/deleted<br/>• workspace/deleted"]:::jobs
-        FUNCS["<b>Functions</b> <i>(served at /api/inngest)</i><br/>• process-source (extract, chunk, embed, store)<br/>• generate-artifact (summary, flashcards, quiz, mind map, ...)<br/>• summarize-conversation (rolling summary)"]:::jobs
+        FUNCS["<b>Functions</b> <i>(served at /api/inngest)</i><br/>• process-source (extract, chunk, embed, store)<br/>• generate-artifact (summary, flashcards, quiz, mind map, repo wiki, ...)<br/>• summarize-conversation (rolling summary)"]:::jobs
         TRIGGERS -.-> FUNCS
     end
 
@@ -171,6 +172,7 @@ flowchart TB
         TAVILY["🔍 <b>Tavily</b><br/>Web search API (chat tool)"]:::ext
         FIRE["🔥 <b>Firecrawl</b><br/>Website crawl (to markdown)"]:::ext
         YT["▶️ <b>YouTube</b><br/>Transcripts (video transcripts)"]:::ext
+        GH["🐙 <b>GitHub</b><br/>Repository files (for repo chat)"]:::ext
         LANGFUSE["📊 <b>Langfuse</b><br/>LLM tracing (OpenTelemetry)"]:::ext
         AXIOM["📑 <b>Axiom</b><br/>Log storage (optional)"]:::ext
     end
@@ -194,6 +196,7 @@ flowchart TB
     SERVICES -- "Web search (chat tool)" --> TAVILY
     SERVICES -- "Crawl website (for sources)" --> FIRE
     SERVICES -- "Fetch transcripts (for sources)" --> YT
+    SERVICES -- "Read repo files (for sources)" --> GH
 
     %% Observability
     SERVICES -. "OpenTelemetry spans (tracing)" .-> LANGFUSE

@@ -9,7 +9,7 @@
  *
  *   npm run smoke                 # core + AI flows (sources indexed, chat, artifacts)
  *   npm run smoke -- --no-ai      # skip anything that calls OpenAI (fast, free)
- *   npm run smoke -- --external   # also PDF upload, website, YouTube, web search
+ *   npm run smoke -- --external   # also PDF upload, website, YouTube, GitHub repo, web search
  *   npm run smoke -- --keep       # leave the created workspaces in place for inspection
  *
  * Env: SMOKE_BASE_URL (default http://localhost:8080), SMOKE_ORIGIN (default
@@ -25,7 +25,7 @@ const ORIGIN = process.env.SMOKE_ORIGIN ?? "http://localhost:3000";
 const args = new Set(process.argv.slice(2));
 /** Run flows that call OpenAI (disabled by `--no-ai`). */
 const AI = !args.has("--no-ai");
-/** Also exercise PDF upload, website, YouTube and web search imports (`--external`). */
+/** Also exercise PDF upload, website, YouTube, GitHub repo and web search imports (`--external`). */
 const EXTERNAL = args.has("--external");
 /** Leave created workspaces in place for inspection (`--keep`). */
 const KEEP = args.has("--keep");
@@ -665,6 +665,9 @@ async function main() {
             400,
         );
     });
+    await step("WIKI without a GitHub source is 400", async () => {
+        expectStatus(await a.post(ws("/artifacts"), { type: "WIKI" }), 400);
+    });
     if (AI) {
         for (const type of ["SUMMARY", "QUIZ"] as const) {
             await step(`generate ${type} to READY`, async () => {
@@ -761,6 +764,104 @@ async function main() {
                 400,
             );
         });
+        await step("import a GitHub repo, indexed per file with paths", async () => {
+            const res = await a.post(ws("/sources/import/github"), {
+                url: "https://github.com/octocat/Spoon-Knife",
+            });
+            skipIfNotConfigured(res);
+            expectStatus(res, 201);
+            expect(res.body?.data?.type === "GITHUB", "source type is not GITHUB");
+            expect(res.body?.data?.metadata?.files?.length > 0, "no files in metadata");
+            state.githubSourceId = res.body?.data?.id;
+            if (!AI) return "imported (indexing skipped with --no-ai)";
+            await waitForSource(a, state.workspaceId, state.githubSourceId);
+            const chunks = await a.get(ws(`/sources/${state.githubSourceId}/chunks`));
+            expect(
+                (chunks.body?.data?.chunks as any[]).every(
+                    (c) => typeof c.metadata?.path === "string",
+                ),
+                "chunk missing path metadata",
+            );
+        });
+        await step("GitHub repo files list shows chunk counts", async () => {
+            if (!state.githubSourceId) throw new Skip("no GitHub source");
+            const res = await a.get(ws(`/sources/${state.githubSourceId}/files`));
+            expectStatus(res, 200);
+            const files = res.body?.data?.files as any[];
+            expect(files.length > 0, "no files listed");
+            expect(typeof res.body?.data?.commitSha === "string", "missing commitSha");
+            if (AI)
+                expect(
+                    files.some((f) => f.chunkCount > 0),
+                    "no file has chunks",
+                );
+        });
+        await step("importing the same repo again is 409", async () => {
+            if (!state.githubSourceId) throw new Skip("no GitHub source");
+            expectStatus(
+                await a.post(ws("/sources/import/github"), { url: "octocat/Spoon-Knife" }),
+                409,
+            );
+        });
+        await step("a bad repo string is 400", async () => {
+            expectStatus(await a.post(ws("/sources/import/github"), { url: "not-a-repo" }), 400);
+        });
+        await step("sync is a no-op when the repo has not changed", async () => {
+            if (!state.githubSourceId) throw new Skip("no GitHub source");
+            if (AI) await waitForSource(a, state.workspaceId, state.githubSourceId);
+            else await sleep(1_000);
+            const res = await a.post(ws(`/sources/${state.githubSourceId}/sync`));
+            // Without AI the source may still be PENDING (409); only assert once it is settled.
+            if (!AI && res.status === 409) throw new Skip("still processing (--no-ai)");
+            expectStatus(res, 202);
+            expect(res.body?.data?.changed === false, "expected changed: false");
+        });
+        await step("syncing a non-GitHub source is 400", async () => {
+            expectStatus(await a.post(ws(`/sources/${state.textSourceId}/sync`)), 400);
+        });
+        if (AI) {
+            await step("chat about the repo cites file paths", async () => {
+                if (!state.githubSourceId) throw new Skip("no GitHub source");
+                const res = await a.post(ws("/chat"), {
+                    messages: [userMessage("Which files are in the Spoon-Knife repository?")],
+                });
+                expectStatus(res, 200);
+                const reply = readChatStream(res.text);
+                expect(reply.length > 0, "empty reply");
+                const conversationId = res.headers.get("x-conversation-id") ?? "";
+                const messages = await a.get(ws(`/conversations/${conversationId}/messages`));
+                const cited = (messages.body?.data as any[])
+                    .filter((m) => m.role === "ASSISTANT")
+                    .flatMap((m) => (m.citations ?? []) as any[]);
+                expect(
+                    cited.some((c) => typeof c.path === "string"),
+                    "no citation carries a file path",
+                );
+            });
+            await step("generate WIKI to READY", async () => {
+                if (!state.githubSourceId) throw new Skip("no GitHub source");
+                const created = await a.post(ws("/artifacts"), {
+                    type: "WIKI",
+                    sourceIds: [state.githubSourceId],
+                });
+                expectStatus(created, 201);
+                const id = created.body?.data?.id as string;
+                const artifact = await poll(
+                    async () => (await a.get(ws(`/artifacts/${id}`))).body?.data,
+                    (x) => x?.status === "READY" || x?.status === "FAILED",
+                    ARTIFACT_TIMEOUT_MS,
+                    INNGEST_HINT,
+                );
+                expect(artifact.status === "READY", `wiki ended ${artifact.status}`);
+                expect(typeof artifact.content?.overview === "string", "wiki has no overview");
+                expect(artifact.content?.modules?.length > 0, "wiki has no modules");
+                expect(
+                    typeof artifact.content?.diagram === "string" &&
+                        !artifact.content.diagram.includes("```"),
+                    "wiki diagram missing or fenced",
+                );
+            });
+        }
         await step("import a web search result as a source", async () => {
             const res = await a.post(ws("/sources/import/web-search"), {
                 title: "Chlorophyll (web result)",

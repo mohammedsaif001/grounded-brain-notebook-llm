@@ -18,7 +18,7 @@ npm run smoke                   # terminal 2
 | ----------------------------- | --------------------------------------------------------------------------------------------------- |
 | `npm run smoke`               | Core + AI flows: indexing, chat, memory, artifacts (~1–2 min)                                       |
 | `npm run smoke -- --no-ai`    | Skips everything that calls OpenAI (fast, free). Indexing, chat and artifact generation are skipped |
-| `npm run smoke -- --external` | Also PDF upload, website, YouTube and web search                                                    |
+| `npm run smoke -- --external` | Also PDF upload, website, YouTube, GitHub repo and web search                                       |
 | `npm run smoke -- --keep`     | Leaves the test workspaces in place so you can inspect them                                         |
 
 Flags can be combined, e.g. `npm run smoke -- --external --keep`.
@@ -93,6 +93,7 @@ configured (the server answers 503) are reported as SKIP, not FAIL.
 - A workspace without READY sources is 400
 - _AI:_ generate a **SUMMARY** (markdown) and a **QUIZ** (structured output, `correctIndex`
   in range) through the background job to `READY`
+- A **WIKI** artifact in a workspace with no GitHub source is 400
 - _AI:_ list artifacts; delete one (204), after which it is 404
 
 ### External integrations, `--external` only
@@ -103,6 +104,13 @@ configured (the server answers 503) are reported as SKIP, not FAIL.
 - **Website import** (Firecrawl, `https://example.com`) indexes to `READY`
 - **YouTube import** (a captioned video) indexes to `READY`
 - A bad YouTube URL is 400
+- **GitHub repo import** (`octocat/Spoon-Knife`, public) becomes a `GITHUB` source, indexes to
+  `READY`, and every chunk has `metadata.path`
+- The repo's **file list** shows files with chunk counts and a commit sha
+- Importing the same repo again is 409; a bad repo string is 400
+- **Sync** with no new commits returns `changed: false`; syncing a non-GitHub source is 400
+- _AI:_ chat about the repo returns a citation with a file `path`
+- _AI:_ a **WIKI** artifact for the repo reaches `READY` with an overview, modules and a diagram
 - A web-search result can be imported as a source
 - _AI:_ chat with `webSearch: true` (Tavily) streams a reply
 
@@ -116,7 +124,7 @@ configured (the server answers 503) are reported as SKIP, not FAIL.
 
 - **Conversation summaries.** The summary job only triggers after 8 messages.
 - **Mem0 learning from chat.** This is part of the summary job.
-- **TAKEAWAYS, FLASHCARDS, MINDMAP and REPORT** artifacts. Only SUMMARY and QUIZ run, to keep cost and time down.
+- **TAKEAWAYS, FLASHCARDS, MINDMAP and REPORT** artifacts, and **syncing a repo that did change** (it would need a repo you can push to). Only SUMMARY and QUIZ run, to keep cost and time down.
 - **Google OAuth.**
 - **Rate limits.**
 - **Langfuse traces.** These are sent if Langfuse is configured, but not asserted.
@@ -129,8 +137,9 @@ configured (the server answers 503) are reported as SKIP, not FAIL.
   memories are deleted.
 - **OpenAI:** a few small calls per run (embeddings, 2 chat replies, a query rewrite, 2
   artifacts). These are tiny with `gpt-4o-mini`.
-- **`--external`:** uses one Firecrawl credit, uploads a small PDF to Cloudinary, and makes a
-  Tavily search.
+- **`--external`:** uses one Firecrawl credit, uploads a small PDF to Cloudinary, makes a
+  Tavily search, and reads a tiny public GitHub repo (a few API calls; anonymous GitHub allows
+  60 per hour, so set `GITHUB_TOKEN` if you run it often). A GitHub rate limit shows as SKIP.
 
 ## Troubleshooting
 

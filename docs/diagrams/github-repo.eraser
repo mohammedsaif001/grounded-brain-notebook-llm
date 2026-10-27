@@ -1,0 +1,34 @@
+// Grounded Brain: GitHub repository import, sync and chat
+// Eraser "Sequence Diagram" diagram-as-code. Paste into a new Sequence diagram at https://app.eraser.io
+title GitHub repo: import → index per file → sync
+autoNumber on
+
+Client [icon: monitor, color: gray] > SourceService [icon: nodejs, color: green]: POST /sources/import/github {url, branch?}
+SourceService > SourceService: parseRepo, reject if already in workspace (409)
+SourceService > GitHub [icon: github, color: gray]: repo info, branch head commit, file tree, file blobs (8 in parallel)
+SourceService > Postgres [icon: postgres, color: blue]: INSERT source (GITHUB, PENDING) with packed files + metadata (commitSha, files)
+SourceService > Inngest [icon: zap, color: purple]: send source/created
+SourceService --> Client: 201 source (PENDING)
+
+Inngest > ProcessSourceJob [icon: file-text, color: purple]: run process-source
+ProcessSourceJob > Postgres: unpack source.content into files
+ProcessSourceJob > ProcessSourceJob: chunk per file (metadata.path), prefix each chunk with "File: path"
+ProcessSourceJob > OpenAI [icon: openai, color: orange]: embed chunks
+ProcessSourceJob > Pinecone [icon: database, color: blue]: upsert vectors (metadata includes path)
+ProcessSourceJob > Postgres: READY
+
+Client > SourceService: POST /sources/:id/sync
+SourceService > GitHub: branch head commit (one call)
+alt [label: commit unchanged and READY] {
+  SourceService --> Client: 202 changed false
+}
+else [label: new commits] {
+  SourceService > GitHub: re-read files
+  SourceService > Postgres: replace content, status PENDING
+  SourceService > Inngest: send source/created
+  SourceService --> Client: 202 changed true
+}
+
+Client > ChatService [icon: message-square, color: green]: POST /chat "where is auth handled?"
+ChatService > Pinecone: top-k chunks (path included)
+ChatService --> Client: streamed answer citing [1] src/auth.ts

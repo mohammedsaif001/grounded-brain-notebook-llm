@@ -3,7 +3,7 @@
 title Source ingestion: create → extract → chunk → embed → index
 autoNumber on
 
-Client [icon: monitor, color: gray] > SourceService [icon: nodejs, color: green]: POST /sources | /upload | /import/website | /import/youtube
+Client [icon: monitor, color: gray] > SourceService [icon: nodejs, color: green]: POST /sources | /upload | /import/website | /import/youtube | /import/github | /:id/sync
 
 alt [label: PDF upload] {
   SourceService > SourceService: multer limits, PdfValidator.assertSafe (bytes, active content, pages)
@@ -15,6 +15,10 @@ else [label: website] {
 }
 else [label: YouTube] {
   SourceService > YouTube [icon: youtube, color: red]: fetch transcript
+}
+else [label: GitHub repo] {
+  SourceService > GitHub [icon: github, color: gray]: read tree + text files (skip binaries, lockfiles, vendored dirs; max 200 files / 2 MB)
+  SourceService > SourceService: pack files into one text with a marker line per file
 }
 
 SourceService > Postgres [icon: postgres, color: blue]: INSERT source (PENDING)
@@ -30,11 +34,14 @@ alt [label: PDF with fileUrl] {
   ProcessSourceJob > Cloudinary: download PDF (signed URL fallback on 401)
   ProcessSourceJob > ProcessSourceJob: unpdf → text per page
 }
+else [label: GITHUB source] {
+  ProcessSourceJob > Postgres: read source.content, unpack into files
+}
 else [label: text already stored] {
   ProcessSourceJob > Postgres: read source.content
 }
 ProcessSourceJob > Postgres: save full text, delete old chunks
-ProcessSourceJob > ProcessSourceJob: LangChain RecursiveCharacterTextSplitter (1000 chars, 100 overlap, per PDF page)
+ProcessSourceJob > ProcessSourceJob: LangChain RecursiveCharacterTextSplitter (1000 chars, 100 overlap, per PDF page / per repo file with metadata.path)
 ProcessSourceJob > Postgres: INSERT source_chunk rows
 
 ProcessSourceJob > ProcessSourceJob: step embed-and-index
