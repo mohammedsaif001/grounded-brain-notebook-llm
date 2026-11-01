@@ -6,9 +6,13 @@
 import { z } from "zod";
 import { propagateAttributes } from "@langfuse/tracing";
 import { inngest } from "../config/inngest.js";
+import { logger } from "../config/logger.js";
 import { ArtifactService } from "../features/artifact/artifact.service.js";
 import { ConversationMemoryService } from "../features/conversation/conversation-memory.service.js";
 import { SourceProcessingService } from "../features/source/source-processing.service.js";
+
+/** Logger for background-job lifecycle lines. */
+const jobLog = logger.child({ kind: "job" });
 
 // Event payloads are untyped at the Inngest boundary; validate them before use so a
 // malformed event fails loudly instead of passing `undefined` ids downstream.
@@ -48,6 +52,7 @@ const processSource = inngest.createFunction(
     },
     async ({ event, step }) => {
         const { sourceId } = sourceEventSchema.parse(event.data);
+        const queuedAt = event.ts ?? Date.now();
 
         await step.run("mark-processing", () => SourceProcessingService.markProcessing(sourceId));
 
@@ -60,8 +65,16 @@ const processSource = inngest.createFunction(
                 await SourceProcessingService.index(sourceId);
             });
 
+            jobLog.info(
+                { job: "process-source", sourceId, chunkCount },
+                `Source indexed: ${chunkCount} chunks (${Date.now() - queuedAt}ms since queued)`,
+            );
             return { sourceId, status: "READY", chunkCount };
         } catch (error) {
+            jobLog.error(
+                { job: "process-source", sourceId, err: error },
+                "Source processing failed",
+            );
             await step.run("mark-failed", () =>
                 SourceProcessingService.markFailed(sourceId, error),
             );
@@ -92,6 +105,7 @@ const generateArtifact = inngest.createFunction(
             ),
         );
 
+        jobLog.info({ job: "generate-artifact", artifactId }, "Artifact generated");
         return { artifactId, status: "READY" };
     },
 );
@@ -115,6 +129,7 @@ const summarizeConversation = inngest.createFunction(
             );
         });
 
+        jobLog.info({ job: "summarize-conversation", conversationId }, "Conversation summarized");
         return { conversationId, status: "SUMMARIZED" };
     },
 );
