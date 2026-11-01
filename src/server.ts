@@ -11,7 +11,24 @@ initTelemetry();
 
 /** The HTTP server created by `app.listen`. */
 const server = app.listen(env.PORT, () => {
-    logger.info(`Server running on http://localhost:${env.PORT}`);
+    logger.info(
+        { env: env.NODE_ENV, port: env.PORT },
+        `Server running on http://localhost:${env.PORT}`,
+    );
+});
+
+server.on("error", (error) => {
+    logger.fatal({ err: error }, "HTTP server error");
+    process.exit(1);
+});
+
+// Last-resort handlers so a stray rejection or crash is logged before the process dies.
+process.on("unhandledRejection", (reason) => {
+    logger.error({ err: reason }, "Unhandled promise rejection");
+});
+process.on("uncaughtException", (error) => {
+    logger.fatal({ err: error }, "Uncaught exception");
+    process.exit(1);
 });
 
 /**
