@@ -1,9 +1,23 @@
 /** Per-request structured logging with request ids. */
 
 import { randomUUID } from "node:crypto";
+import type { IncomingMessage } from "node:http";
 import type { Request } from "express";
 import { pinoHttp } from "pino-http";
 import { logger } from "../../config/logger.js";
+
+/** Full request path without the query string (routers strip their mount prefix from `req.url`). */
+const pathOf = (req: IncomingMessage & { originalUrl?: string }) =>
+    (req.originalUrl ?? req.url ?? "").split("?")[0];
+
+/**
+ * Requests that are only noise: health probes, and the Inngest dev server re-syncing
+ * (`PUT /api/inngest`) every few seconds.
+ */
+const isQuiet = (req: IncomingMessage & { originalUrl?: string }) => {
+    const path = pathOf(req);
+    return path.startsWith("/health") || (req.method === "PUT" && path.startsWith("/api/inngest"));
+};
 
 /** Accepts a caller-supplied request id (e.g. from a proxy) only if it looks sane. */
 const REQUEST_ID_PATTERN = /^[\w-]{1,64}$/;
@@ -24,19 +38,25 @@ export const requestLogger = pinoHttp({
         res.setHeader("X-Request-Id", id);
         return id;
     },
-    customProps: (req) => ({ userId: (req as Request).session?.user?.id }),
+    customProps: (req) => ({
+        kind: "http",
+        who: { userId: (req as Request).session?.user?.id, ip: req.socket.remoteAddress },
+    }),
+    customSuccessMessage: (req, res, ms) =>
+        `${req.method} ${pathOf(req)} ${res.statusCode} - ${Math.round(ms)}ms`,
+    customErrorMessage: (req, res) => `${req.method} ${pathOf(req)} ${res.statusCode} failed`,
     customLogLevel: (_req, res, error) => {
         if (error || res.statusCode >= 500) return "error";
         if (res.statusCode >= 400) return "warn";
         return "info";
     },
-    // Health probes are polled constantly; logging them would drown out real traffic.
-    autoLogging: { ignore: (req) => req.url?.startsWith("/health") ?? false },
+    // Probes and dev-server polling would drown out real traffic.
+    autoLogging: { ignore: isQuiet },
     serializers: {
-        req: (req: { id: string; method: string; url: string }) => ({
+        req: (req: IncomingMessage & { id: string; originalUrl?: string }) => ({
             id: req.id,
             method: req.method,
-            url: req.url,
+            url: pathOf(req),
         }),
         res: (res: { statusCode: number }) => ({ statusCode: res.statusCode }),
     },

@@ -15,5 +15,5 @@ export const inngest = new Inngest({
     eventKey: env.INNGEST_EVENT_KEY,
     signingKey: env.INNGEST_SIGNING_KEY,
     isDev: inngestDevMode,
-    logger: logger.child({ component: "inngest" }),
+    logger: logger.child({ component: "inngest" }, { level: "info" }),
 });
