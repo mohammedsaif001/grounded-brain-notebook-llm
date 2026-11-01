@@ -9,6 +9,7 @@
  * (searchable in its web UI), in addition to the console output.
  */
 
+import { fileURLToPath } from "node:url";
 import pino, { type TransportTargetOptions } from "pino";
 import { env, isProduction } from "./env.js";
 
@@ -19,9 +20,10 @@ const level = env.LOG_LEVEL ?? (isProduction ? "info" : "debug");
 const consoleTarget: TransportTargetOptions = isProduction
     ? { target: "pino/file", level, options: { destination: 1 } }
     : {
-          target: "pino-pretty",
+          // pino-pretty with our labels and spacing (src/config/pretty-transport.js).
+          target: fileURLToPath(new URL("./pretty-transport.js", import.meta.url)),
           level,
-          options: { translateTime: "SYS:HH:MM:ss", ignore: "pid,hostname" },
+          options: { colorize: true, translateTime: "SYS:HH:MM:ss", singleLine: false },
       };
 
 /** Axiom output, only when a token is configured (env validation then guarantees a dataset). */
@@ -51,6 +53,8 @@ const targets = axiomTarget ? [consoleTarget, axiomTarget] : isProduction ? [] :
  */
 export const logger = pino({
     level,
+    // pid and hostname are the same on every line of a single-process app.
+    base: null,
     redact: {
         paths: ["req.headers.authorization", "req.headers.cookie", 'res.headers["set-cookie"]'],
         censor: "[redacted]",

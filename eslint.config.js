@@ -7,7 +7,7 @@ import tseslint from "typescript-eslint";
 
 export default defineConfig(
     {
-        ignores: ["dist/**", "node_modules/**", "src/generated/**"],
+        ignores: ["dist/**", "node_modules/**", "src/generated/**", "src/config/pretty-transport.js"],
     },
 
     js.configs.recommended,
