@@ -12,6 +12,7 @@ import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { env, isProduction } from "./env.js";
 import prisma from "./db.js";
+import { logger } from "./logger.js";
 
 /**
  * Configured Better Auth instance shared by Express route handlers.
@@ -37,6 +38,34 @@ export const auth = betterAuth({
                   },
               }
             : {},
+    // Sign-up and sign-in events, plus Better Auth warnings and errors, through pino.
+    logger: {
+        level: "warn",
+        log: (level, message, ...args) => {
+            logger[level === "error" ? "error" : "warn"](
+                { kind: "auth", detail: args.length > 0 ? args : undefined },
+                message,
+            );
+        },
+    },
+    databaseHooks: {
+        user: {
+            create: {
+                after: (user) => {
+                    logger.info({ kind: "auth", userId: user.id }, "New user signed up");
+                    return Promise.resolve();
+                },
+            },
+        },
+        session: {
+            create: {
+                after: (session) => {
+                    logger.info({ kind: "auth", userId: session.userId }, "User signed in");
+                    return Promise.resolve();
+                },
+            },
+        },
+    },
     emailAndPassword: {
         // Dev/testing convenience. Turned OFF when NODE_ENV=production.
         enabled: !isProduction,
