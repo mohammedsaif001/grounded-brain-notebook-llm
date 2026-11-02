@@ -1,4 +1,5 @@
 import { MemoryNotFoundError, ValidationError } from "mem0ai";
+import { timed } from "../../shared/logging/timed.js";
 import { Mem0Client } from "../../config/mem0.js";
 import { MEMORY_SEARCH_MIN_SCORE, MEMORY_SEARCH_TOP_K } from "../../config/ai.config.js";
 
@@ -140,11 +141,13 @@ export class MemoryRepository {
             return [];
         }
 
-        const results = await Mem0Client.get().search(query, {
-            filters: { user_id: userId },
-            topK: MEMORY_SEARCH_TOP_K,
-            threshold: MEMORY_SEARCH_MIN_SCORE,
-        });
+        const results = await timed("mem0", "search", () =>
+            Mem0Client.get().search(query, {
+                filters: { user_id: userId },
+                topK: MEMORY_SEARCH_TOP_K,
+                threshold: MEMORY_SEARCH_MIN_SCORE,
+            }),
+        );
 
         return results.results.map(toMemoryRecord);
     }
@@ -193,11 +196,12 @@ export class MemoryRepository {
             return;
         }
 
-        await Mem0Client.get().add(messages, {
-            userId,
-            infer: true,
-            metadata,
-        });
+        await timed(
+            "mem0",
+            "learn",
+            () => Mem0Client.get().add(messages, { userId, infer: true, metadata }),
+            { messages: messages.length },
+        );
     }
 
     /**

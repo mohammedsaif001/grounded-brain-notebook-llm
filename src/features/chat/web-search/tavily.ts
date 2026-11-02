@@ -2,6 +2,7 @@
  * Web search for the chat `web_search` tool, backed by Tavily.
  */
 
+import { timed } from "../../../shared/logging/timed.js";
 import { TavilyClient } from "../../../config/tavily.js";
 
 /** One normalised web result. */
@@ -29,11 +30,13 @@ export class TavilySearch {
      * @throws {APIError} ServiceUnavailable when `TAVILY_API_KEY` is not configured
      */
     static async search(query: string): Promise<TavilySearchResponse> {
-        const response = await TavilyClient.get().search(query, {
-            searchDepth: "basic",
-            maxResults: 5,
-            includeAnswer: true,
-        });
+        const response = await timed("tavily", "search", () =>
+            TavilyClient.get().search(query, {
+                searchDepth: "basic",
+                maxResults: 5,
+                includeAnswer: true,
+            }),
+        );
 
         return {
             query,

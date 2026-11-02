@@ -1,4 +1,5 @@
 import { Errors, type PineconeRecord } from "@pinecone-database/pinecone";
+import { timed } from "../logging/timed.js";
 import { PineconeClient, type VectorMetadata } from "../../config/pinecone.js";
 
 /** Pinecone upsert batch size. */
@@ -41,9 +42,16 @@ export class VectorRepository {
 
         const namespace = (await PineconeClient.getIndex()).namespace(workspaceId);
 
-        for (let i = 0; i < records.length; i += UPSERT_BATCH_SIZE) {
-            await namespace.upsert({ records: records.slice(i, i + UPSERT_BATCH_SIZE) });
-        }
+        await timed(
+            "pinecone",
+            "upsert",
+            async () => {
+                for (let i = 0; i < records.length; i += UPSERT_BATCH_SIZE) {
+                    await namespace.upsert({ records: records.slice(i, i + UPSERT_BATCH_SIZE) });
+                }
+            },
+            { vectors: records.length },
+        );
     }
 
     /**
@@ -56,11 +64,12 @@ export class VectorRepository {
      */
     static async query(workspaceId: string, vector: number[], topK: number) {
         const index = await PineconeClient.getIndex();
-        const result = await index.namespace(workspaceId).query({
-            vector,
-            topK,
-            includeMetadata: true,
-        });
+        const result = await timed(
+            "pinecone",
+            "query",
+            () => index.namespace(workspaceId).query({ vector, topK, includeMetadata: true }),
+            { topK },
+        );
 
         return result.matches ?? [];
     }

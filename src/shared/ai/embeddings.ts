@@ -1,4 +1,5 @@
 import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL } from "../../config/ai.config.js";
+import { timed } from "../logging/timed.js";
 import { openaiClient, scheduleOpenAI } from "../../config/openai.js";
 
 /** Creates text embeddings with OpenAI (model and dimensions come from `config/ai.config.ts`). */
@@ -16,12 +17,18 @@ export class EmbeddingClient {
             return [];
         }
 
-        const response = await scheduleOpenAI(() =>
-            openaiClient.embeddings.create({
-                input: texts,
-                model: EMBEDDING_MODEL,
-                dimensions: EMBEDDING_DIMENSIONS,
-            }),
+        const response = await timed(
+            "openai",
+            "embed",
+            () =>
+                scheduleOpenAI(() =>
+                    openaiClient.embeddings.create({
+                        input: texts,
+                        model: EMBEDDING_MODEL,
+                        dimensions: EMBEDDING_DIMENSIONS,
+                    }),
+                ),
+            { texts: texts.length },
         );
 
         return response.data.sort((a, b) => a.index - b.index).map((item) => item.embedding);
