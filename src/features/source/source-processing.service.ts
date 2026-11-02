@@ -13,6 +13,7 @@
  * Inngest runs these as separate durable steps (see `jobs/index.ts`).
  */
 
+import { logger } from "../../config/logger.js";
 import type { PineconeRecord } from "@pinecone-database/pinecone";
 import type { Prisma } from "../../generated/prisma/client.js";
 import { TextChunker } from "./ingestion/chunking.js";
@@ -195,6 +196,11 @@ export class SourceProcessingService {
             })),
         );
 
+        logger.info(
+            { kind: "ingest", sourceId, type: source.type, chunks: saved.length },
+            `Source chunked: ${saved.length} chunks`,
+        );
+
         return { chunkCount: saved.length };
     }
 
@@ -260,6 +266,7 @@ export class SourceProcessingService {
             throw new Error("Source not found");
         }
 
+        const startedAt = Date.now();
         const chunks = await SourceChunkRepository.findAllBySourceId(sourceId);
         const records = await this.buildVectorRecords(source, chunks);
 
@@ -271,8 +278,17 @@ export class SourceProcessingService {
         // The source may have been deleted while we were embedding; don't leave its vectors behind.
         if (!(await SourceRepository.findById(source.id))) {
             await VectorRepository.deleteBySourceId(source.workspaceId, source.id);
+            logger.warn(
+                { kind: "ingest", sourceId },
+                "Source was deleted while indexing; its vectors were removed",
+            );
             return null;
         }
+
+        logger.info(
+            { kind: "ingest", sourceId, vectors: records.length },
+            `Source embedded and indexed: ${records.length} vectors - ${Date.now() - startedAt}ms`,
+        );
 
         return SourceRepository.update(source.id, {
             status: "READY",

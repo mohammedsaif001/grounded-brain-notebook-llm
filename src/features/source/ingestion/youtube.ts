@@ -3,6 +3,7 @@
  */
 
 import { YoutubeTranscript } from "youtube-transcript";
+import { logger } from "../../../config/logger.js";
 import { APIError } from "../../../shared/http/api-error.js";
 
 /** Fetches YouTube transcripts. */
@@ -40,6 +41,7 @@ export class YoutubeClient {
             if (error instanceof APIError) {
                 throw error;
             }
+            logger.warn({ kind: "ingest", videoId, err: error }, "YouTube transcript fetch failed");
             throw APIError.BadRequest(
                 "Could not fetch transcript. The video may not have captions.",
             );

@@ -7,6 +7,7 @@
  */
 
 import { GithubClient } from "../../../config/github.js";
+import { logger } from "../../../config/logger.js";
 import { APIError } from "../../../shared/http/api-error.js";
 
 /** Most files read from one repository. */
@@ -178,6 +179,11 @@ function toApiError(error: unknown, owner: string, repo: string) {
     const status = (error as { status?: number }).status;
     const message = error instanceof Error ? error.message : "";
 
+    // A bad token or exhausted rate limit is an operator problem, not a user mistake.
+    if (status === 401 || status === 403 || status === 429) {
+        logger.warn({ kind: "ingest", owner, repo, status, err: error }, "GitHub request refused");
+    }
+
     if (status === 404) {
         return APIError.NotFound(
             `GitHub repository "${owner}/${repo}" was not found, or it is private and the server token cannot read it`,
@@ -299,6 +305,7 @@ export class GithubRepoClient {
         let totalChars = 0;
         let truncated = tree.truncated === true || candidates.length > wanted.length;
         let overBudget = false;
+        let skipped = 0;
 
         for (let i = 0; i < wanted.length && !overBudget; i += FETCH_CONCURRENCY) {
             const batch = wanted.slice(i, i + FETCH_CONCURRENCY);
@@ -321,8 +328,13 @@ export class GithubRepoClient {
                         }
 
                         return { path: item.path, content };
-                    } catch {
+                    } catch (error) {
                         // One unreadable file should not fail the whole import.
+                        skipped += 1;
+                        logger.debug(
+                            { kind: "ingest", owner, repo, path: item.path, err: error },
+                            "Skipped unreadable repository file",
+                        );
                         return null;
                     }
                 }),
@@ -343,6 +355,19 @@ export class GithubRepoClient {
         if (files.length === 0) {
             throw APIError.BadRequest("This repository has no readable text files");
         }
+
+        logger.info(
+            {
+                kind: "ingest",
+                owner,
+                repo,
+                files: files.length,
+                candidates: candidates.length,
+                skipped,
+                truncated,
+            },
+            `GitHub repo read: ${owner}/${repo} (${files.length} files${truncated ? ", truncated" : ""})`,
+        );
 
         return {
             owner,

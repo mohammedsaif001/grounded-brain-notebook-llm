@@ -1,3 +1,4 @@
+import { logger } from "../../config/logger.js";
 import type { Prisma } from "../../generated/prisma/client.js";
 import { EventPublisher } from "../../jobs/events.js";
 import { CloudinaryStorage } from "./ingestion/cloudinary.js";
@@ -60,6 +61,10 @@ export class SourceService {
      */
     private static async createAndQueue(data: CreateSourceData) {
         const source = await SourceRepository.create(data);
+        logger.info(
+            { kind: "ingest", sourceId: source.id, workspaceId: source.workspaceId },
+            `Source queued: ${source.type} "${source.title}"`,
+        );
 
         await EventPublisher.sourceCreated({
             sourceId: source.id,
@@ -175,8 +180,12 @@ export class SourceService {
             const extracted = await PdfExtractor.fromBuffer(file.buffer);
             content = extracted.text;
             pageCount = extracted.pageCount;
-        } catch {
+        } catch (error) {
             // The worker will retry extraction from Cloudinary.
+            logger.warn(
+                { kind: "ingest", workspaceId, err: error },
+                "PDF text extraction at upload failed; the worker will retry from Cloudinary",
+            );
         }
 
         return this.createAndQueue({

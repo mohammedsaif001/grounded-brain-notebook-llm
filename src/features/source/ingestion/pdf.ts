@@ -6,6 +6,7 @@
  */
 
 import { extractText, getDocumentProxy } from "unpdf";
+import { logger } from "../../../config/logger.js";
 import { CloudinaryStorage } from "./cloudinary.js";
 
 /** Result of extracting text from a PDF document. */
@@ -94,6 +95,14 @@ export class PdfExtractor {
                 throw error;
             }
 
+            logger.debug(
+                { kind: "ingest", publicId: input.publicId },
+                "Cloudinary public URL returned 401, retrying with a signed URL",
+            );
+            logger.debug(
+                { kind: "ingest", publicId: input.publicId },
+                "Cloudinary public URL returned 401, retrying with a signed URL",
+            );
             const signedUrl = CloudinaryStorage.getSignedDownloadUrl(
                 input.publicId,
                 input.resourceType ?? "raw",
