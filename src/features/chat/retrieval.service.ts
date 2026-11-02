@@ -94,6 +94,17 @@ export class RetrievalService {
             });
         }
 
+        logger.debug(
+            {
+                kind: "chat",
+                workspaceId,
+                matches: matches.length,
+                kept: chunks.length,
+                topScore: chunks[0]?.score,
+            },
+            `Retrieval: kept ${chunks.length}/${matches.length} chunks`,
+        );
+
         return chunks;
     }
 }

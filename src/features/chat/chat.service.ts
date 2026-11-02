@@ -14,6 +14,7 @@
  */
 
 import type { Response } from "express";
+import type { LanguageModelUsage } from "ai";
 import { propagateAttributes } from "@langfuse/tracing";
 import { z } from "zod";
 import {
@@ -148,6 +149,7 @@ export class ChatService {
         userId: string,
         input: ChatInput,
     ) {
+        const startedAt = Date.now();
         const workspace = await WorkspaceService.getForUser(workspaceId, userId);
         const requestedModel = input.model ?? workspace.defaultModel;
         const chatModel = CHAT_MODELS.find((model) => model === requestedModel) ?? CHAT_MODEL;
@@ -207,6 +209,8 @@ export class ChatService {
         // Accumulated across every web_search call in this reply so [W#] labels stay unique.
         const webResults: TavilySearchResult[] = [];
 
+        let totalUsage: PromiseLike<LanguageModelUsage> | undefined;
+
         const stream = createUIMessageStream({
             originalMessages: input.messages,
             // Headers are already sent once streaming starts, so failures are reported in-stream.
@@ -251,6 +255,7 @@ export class ChatService {
                     telemetry: { functionId: "chat" },
                 });
 
+                totalUsage = result.totalUsage;
                 writer.merge(toUIMessageStream({ stream: result.stream }));
             },
             onFinish: async ({ responseMessage, isAborted }) => {
@@ -262,6 +267,25 @@ export class ChatService {
                 if (!assistantText) {
                     return;
                 }
+
+                const usage = await totalUsage?.then(
+                    (u) => u,
+                    () => undefined,
+                );
+                logger.info(
+                    {
+                        kind: "chat",
+                        who: { userId, conversationId: conversation.id },
+                        model: chatModel,
+                        sources: retrievedChunks.length,
+                        memories: userMemories.length,
+                        webSearch: webSearchEnabled ? webResults.length : false,
+                        ...(usage && {
+                            tokens: `in ${usage.inputTokens ?? 0} | out ${usage.outputTokens ?? 0} | total ${usage.totalTokens ?? 0}`,
+                        }),
+                    },
+                    `Chat reply (${chatModel}) - ${Date.now() - startedAt}ms`,
+                );
 
                 // Runs after the reply has streamed, so errors can't reach the Express error
                 // handler; log them instead of letting them become an unhandled rejection.
