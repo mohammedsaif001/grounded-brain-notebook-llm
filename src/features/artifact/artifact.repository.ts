@@ -1,5 +1,7 @@
 import type { Prisma } from "../../generated/prisma/client.js";
 import prisma from "../../config/db.js";
+import { pageArgs, toPage } from "../../shared/http/pagination.js";
+import type { ListArtifactsQuery } from "./artifact.validator.js";
 
 /** Columns returned for every artifact query. */
 export const artifactSelect = {
@@ -11,6 +13,7 @@ export const artifactSelect = {
     sourceIds: true,
     status: true,
     metadata: true,
+    viewedAt: true,
     createdAt: true,
     updatedAt: true,
 } as const;
@@ -50,6 +53,47 @@ export class ArtifactRepository {
             where: { workspaceId },
             select: artifactSelect,
             orderBy: { createdAt: "desc" },
+        });
+    }
+
+    /**
+     * One page of a workspace's artifacts (newest first), with the total across all pages.
+     *
+     * Without `limit` the whole list comes back as a single page.
+     *
+     * @param workspaceId - Owning workspace
+     * @param query - Optional `type` and `status` filters plus `limit` and `cursor`
+     */
+    static async findPage(workspaceId: string, query: ListArtifactsQuery = {}) {
+        const where = {
+            workspaceId,
+            ...(query.type ? { type: query.type } : {}),
+            ...(query.status ? { status: query.status } : {}),
+        };
+
+        const [rows, total] = await Promise.all([
+            prisma.learningArtifact.findMany({
+                where,
+                select: artifactSelect,
+                // `id` breaks ties so a cursor always lands on one exact row.
+                orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+                ...pageArgs(query),
+            }),
+            prisma.learningArtifact.count({ where }),
+        ]);
+
+        return toPage(rows, total, query);
+    }
+
+    /**
+     * Records the first time an artifact was opened; later calls change nothing.
+     *
+     * @param artifactId - Artifact that was opened
+     */
+    static async markViewed(artifactId: string) {
+        await prisma.learningArtifact.updateMany({
+            where: { id: artifactId, viewedAt: null },
+            data: { viewedAt: new Date() },
         });
     }
 

@@ -1,16 +1,28 @@
 import type { Request, Response } from "express";
 import { ArtifactService } from "./artifact.service.js";
 import { APIResponse } from "../../shared/http/api-response.js";
-import { artifactIdParamSchema, createArtifactSchema } from "./artifact.validator.js";
+import {
+    artifactIdParamSchema,
+    createArtifactSchema,
+    listArtifactsQuerySchema,
+} from "./artifact.validator.js";
 import { workspaceIdParamSchema } from "../workspace/workspace.validator.js";
 
 /** HTTP handlers for `/api/workspaces/:workspaceId/artifacts`. Each validates input, then delegates to the service. */
 export class ArtifactController {
-    /** GET `/` — lists the workspace's artifacts (200). */
+    /** GET `/` — lists the workspace's artifacts; `type`, `status` filters and `limit`/`cursor` paging (200). */
     static list = async (req: Request, res: Response) => {
         const { workspaceId } = workspaceIdParamSchema.parse(req.params);
-        const artifacts = await ArtifactService.list(workspaceId, req.session.user.id);
-        APIResponse.Ok(res, artifacts);
+        const query = listArtifactsQuerySchema.parse(req.query);
+        const page = await ArtifactService.list(workspaceId, req.session.user.id, query);
+        APIResponse.Page(res, page);
+    };
+
+    /** POST `/:artifactId/viewed` — records that the user opened the artifact (204). */
+    static markViewed = async (req: Request, res: Response) => {
+        const { workspaceId, artifactId } = artifactIdParamSchema.parse(req.params);
+        await ArtifactService.markViewed(workspaceId, artifactId, req.session.user.id);
+        APIResponse.NoContent(res);
     };
 
     /** GET `/:artifactId` — returns one artifact (200). */
@@ -20,7 +32,7 @@ export class ArtifactController {
         APIResponse.Ok(res, artifact);
     };
 
-    /** POST `/` — creates a pending artifact and queues generation (201). */
+    /** POST `/` — creates a pending artifact from the sources or a conversation and queues generation (201). */
     static create = async (req: Request, res: Response) => {
         const { workspaceId } = workspaceIdParamSchema.parse(req.params);
         const input = createArtifactSchema.parse(req.body);

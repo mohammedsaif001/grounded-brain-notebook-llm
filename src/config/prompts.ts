@@ -161,16 +161,23 @@ export const artifactSystem = (type: string) =>
         "Be clear, educational, and well-structured.",
     ].join("\n");
 
+/**
+ * Added to prompts whose output cites its sources. The material is split into sources headed
+ * `# [1] Title`, `# [2] Title`, ...; those numbers are what the model cites.
+ */
+const SOURCE_NUMBERS_RULE =
+    "The material is divided into numbered sources, each headed like `# [1] Title`. Where a `sources` field asks for source numbers, list the numbers of the sources the item is based on (usually one or two). Use an empty array when the material has no numbered sources.";
+
 /** Per-type user prompts for artifact generation; each receives the combined source text. */
 export const ARTIFACT_PROMPTS = {
     SUMMARY: (sourceText: string) =>
-        `Write a comprehensive markdown summary of the following sources:\n\n${sourceText}`,
+        `Write a comprehensive markdown summary of the following sources. After each statement, cite the source it comes from with its number in square brackets, like [1] or [2]; the numbers are in the \`# [n] Title\` headings. Do not add a separate reference list. If the material has no numbered sources, do not add citations.\n\n${sourceText}`,
     TAKEAWAYS: (sourceText: string) =>
         `Extract the most important key takeaways as concise bullet points from:\n\n${sourceText}`,
     FLASHCARDS: (sourceText: string) =>
-        `Create study flashcards (front/back) covering the main concepts from:\n\n${sourceText}`,
+        `Create study flashcards (front/back) covering the main concepts from the material below. ${SOURCE_NUMBERS_RULE}\n\n${sourceText}`,
     QUIZ: (sourceText: string) =>
-        `Create a multiple-choice quiz with explanations. correctIndex is the 0-based index of the correct option. Source material:\n\n${sourceText}`,
+        `Create a multiple-choice quiz with explanations. correctIndex is the 0-based index of the correct option. ${SOURCE_NUMBERS_RULE}\n\nSource material:\n\n${sourceText}`,
     MINDMAP: (sourceText: string) =>
         `Create a mind map as nodes and edges. Use a central topic node and branch out logically. Every edge source and target must be an existing node id. Source material:\n\n${sourceText}`,
     WIKI: (sourceText: string) =>
@@ -183,5 +190,5 @@ export const ARTIFACT_PROMPTS = {
 - gettingStarted: how to install, configure and run it, from the README, manifests and scripts (markdown). Say so if the repository does not document this.
 Repository:\n\n${sourceText}`,
     REPORT: (sourceText: string) =>
-        `Write a structured long-form report with sections and a full markdown version from:\n\n${sourceText}`,
+        `Write a structured long-form report with sections and a full markdown version from the material below. ${SOURCE_NUMBERS_RULE}\n\n${sourceText}`,
 };

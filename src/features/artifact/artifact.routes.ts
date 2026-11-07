@@ -9,4 +9,5 @@ export const artifactRouter = Router({ mergeParams: true });
 artifactRouter.get("/", asyncHandler(ArtifactController.list));
 artifactRouter.post("/", aiRateLimiter, asyncHandler(ArtifactController.create));
 artifactRouter.get("/:artifactId", asyncHandler(ArtifactController.get));
+artifactRouter.post("/:artifactId/viewed", asyncHandler(ArtifactController.markViewed));
 artifactRouter.delete("/:artifactId", asyncHandler(ArtifactController.delete));

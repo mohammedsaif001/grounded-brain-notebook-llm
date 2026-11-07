@@ -1,9 +1,11 @@
 import { EventPublisher } from "../../jobs/events.js";
 import { ArtifactRepository, type ArtifactRecord } from "./artifact.repository.js";
 import { APIError } from "../../shared/http/api-error.js";
-import type { CreateArtifactInput } from "./artifact.validator.js";
+import type { CreateArtifactInput, ListArtifactsQuery } from "./artifact.validator.js";
 import { ArtifactGenerationService } from "./artifact-generation.service.js";
+import { ConversationService } from "../conversation/conversation.service.js";
 import { WorkspaceService } from "../workspace/workspace.service.js";
+import type { Prisma } from "../../generated/prisma/client.js";
 
 /** Default artifact titles by type, used when the client doesn't send one. */
 const DEFAULT_ARTIFACT_TITLES: Record<ArtifactRecord["type"], string> = {
@@ -19,15 +21,29 @@ const DEFAULT_ARTIFACT_TITLES: Record<ArtifactRecord["type"], string> = {
 /** Learning artifact business logic: CRUD plus the background generation entry point. */
 export class ArtifactService {
     /**
-     * Lists artifacts in a workspace, newest first.
+     * Lists artifacts in a workspace, newest first, one page at a time when `limit` is given.
      *
      * @param workspaceId - Workspace to list from
      * @param userId - Requesting user; must own the workspace
-     * @returns Artifacts with their generation status
+     * @param query - Optional `type` and `status` filters plus `limit` and `cursor`
+     * @returns The page of artifacts, the total matching, and the next cursor
      */
-    static async list(workspaceId: string, userId: string) {
+    static async list(workspaceId: string, userId: string, query: ListArtifactsQuery = {}) {
         await WorkspaceService.getForUser(workspaceId, userId);
-        return ArtifactRepository.findAllByWorkspaceId(workspaceId);
+        return ArtifactRepository.findPage(workspaceId, query);
+    }
+
+    /**
+     * Records that the user opened a finished artifact (clears its "new" state). Safe to repeat.
+     *
+     * @param workspaceId - Workspace the artifact belongs to
+     * @param artifactId - Artifact that was opened
+     * @param userId - Requesting user; must own the workspace
+     * @throws {APIError} NotFound when the artifact is not found
+     */
+    static async markViewed(workspaceId: string, artifactId: string, userId: string) {
+        await this.get(workspaceId, artifactId, userId);
+        await ArtifactRepository.markViewed(artifactId);
     }
 
     /**
@@ -67,11 +83,22 @@ export class ArtifactService {
         await WorkspaceService.getForUser(workspaceId, userId);
 
         // Validate without loading source content; the worker gathers the text.
-        const sourceIds = await ArtifactGenerationService.resolveReadySourceIds(
-            workspaceId,
-            input.sourceIds,
-            input.type === "WIKI" ? "GITHUB" : undefined,
-        );
+        const fromConversation = input.conversationId
+            ? await this.resolveConversation(
+                  workspaceId,
+                  userId,
+                  input.conversationId,
+                  input.messageIds,
+              )
+            : undefined;
+
+        const sourceIds =
+            fromConversation?.sourceIds ??
+            (await ArtifactGenerationService.resolveReadySourceIds(
+                workspaceId,
+                input.sourceIds,
+                input.type === "WIKI" ? "GITHUB" : undefined,
+            ));
 
         const artifact = await ArtifactRepository.create({
             workspaceId,
@@ -81,6 +108,10 @@ export class ArtifactService {
                 `${DEFAULT_ARTIFACT_TITLES[input.type]} · ${new Date().toLocaleDateString()}`,
             sourceIds,
             status: "PENDING",
+            // Tells the worker to read the conversation instead of the sources.
+            ...(fromConversation && {
+                metadata: fromConversation.metadata,
+            }),
         });
 
         await EventPublisher.artifactRequested({
@@ -89,6 +120,61 @@ export class ArtifactService {
         });
 
         return artifact;
+    }
+
+    /**
+     * Checks that a conversation can be turned into an artifact and works out what to record.
+     *
+     * @param workspaceId - Workspace the conversation must belong to
+     * @param userId - Requesting user
+     * @param conversationId - Conversation to learn from
+     * @param messageIds - Optional subset of its messages
+     * @returns The ids of the sources the conversation cited, and the metadata for the worker
+     * @throws {APIError} NotFound for an unknown conversation, BadRequest for unknown messages
+     *   or when there is nothing to learn from
+     */
+    private static async resolveConversation(
+        workspaceId: string,
+        userId: string,
+        conversationId: string,
+        messageIds?: string[],
+    ) {
+        const messages = await ConversationService.listMessages(
+            workspaceId,
+            conversationId,
+            userId,
+        );
+
+        const selected = messageIds?.length
+            ? messages.filter((message) => messageIds.includes(message.id))
+            : messages;
+
+        if (messageIds?.length && selected.length !== new Set(messageIds).size) {
+            throw APIError.BadRequest("Some messageIds do not belong to this conversation");
+        }
+        if (selected.length === 0) {
+            throw APIError.BadRequest("This conversation has no messages to learn from yet");
+        }
+
+        // Sources the chosen replies cited, so the artifact lists what it was built from.
+        const cited = new Set<string>();
+        for (const message of selected) {
+            if (Array.isArray(message.citations)) {
+                for (const citation of message.citations as { sourceId?: unknown }[]) {
+                    if (typeof citation?.sourceId === "string") {
+                        cited.add(citation.sourceId);
+                    }
+                }
+            }
+        }
+
+        return {
+            sourceIds: [...cited],
+            metadata: {
+                conversationId,
+                ...(messageIds?.length ? { messageIds: [...new Set(messageIds)] } : {}),
+            } satisfies Prisma.InputJsonObject,
+        };
     }
 
     /**
@@ -123,21 +209,38 @@ export class ArtifactService {
 
         await ArtifactRepository.update(artifactId, { status: "PROCESSING" });
 
+        const origin =
+            artifact.metadata &&
+            typeof artifact.metadata === "object" &&
+            !Array.isArray(artifact.metadata)
+                ? (artifact.metadata as { conversationId?: string; messageIds?: string[] })
+                : {};
+
         try {
-            const context = await ArtifactGenerationService.gatherSourceContext(
-                artifact.workspaceId,
-                artifact.sourceIds,
-            );
+            // Built from a conversation when it was asked for, otherwise from the ready sources.
+            const context = origin.conversationId
+                ? await ArtifactGenerationService.gatherConversationContext(
+                      origin.conversationId,
+                      origin.messageIds,
+                  )
+                : await ArtifactGenerationService.gatherSourceContext(
+                      artifact.workspaceId,
+                      artifact.sourceIds,
+                  );
 
             const content = await ArtifactGenerationService.generateContent(
                 artifact.type,
                 context.text,
+                context.sources,
             );
 
             return ArtifactRepository.update(artifactId, {
                 status: "READY",
                 content,
                 metadata: {
+                    ...(origin.conversationId
+                        ? { conversationId: origin.conversationId, messageIds: origin.messageIds }
+                        : {}),
                     generatedAt: new Date().toISOString(),
                     processingError: undefined,
                 },
@@ -146,6 +249,10 @@ export class ArtifactService {
             await ArtifactRepository.update(artifactId, {
                 status: "FAILED",
                 metadata: {
+                    // Kept so a retry still reads the conversation it was asked to.
+                    ...(origin.conversationId
+                        ? { conversationId: origin.conversationId, messageIds: origin.messageIds }
+                        : {}),
                     processingError:
                         error instanceof Error ? error.message : "Artifact generation failed",
                 },

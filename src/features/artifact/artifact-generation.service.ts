@@ -13,6 +13,7 @@ import {
     CHAT_MODEL,
 } from "../../config/ai.config.js";
 import { GithubRepoClient } from "../source/ingestion/github.js";
+import { MessageRepository } from "../conversation/message.repository.js";
 import { SourceService } from "../source/source.service.js";
 import type { ArtifactRecord } from "./artifact.repository.js";
 import { APIError } from "../../shared/http/api-error.js";
@@ -23,6 +24,21 @@ const CONTEXT_OVERHEAD_CHARS = 2_000;
 /** Max parallel model calls when condensing one oversized source. */
 const CONDENSE_CONCURRENCY = 4;
 
+/** A source the generated material was built from, numbered as in the context (`# [1] Title`). */
+export type ContextSource = { id: string; title: string };
+
+/** A source an item (card, question, section, summary statement) is based on. */
+export type ArtifactCitation = {
+    /** The number shown in the context and in summary text, e.g. `1` for `[1]`. */
+    marker: number;
+    sourceId: string;
+    /** The source's title. */
+    label: string;
+};
+
+/** Source numbers the model reports for an item; turned into {@link ArtifactCitation}s afterwards. */
+const sourceNumbers = z.array(z.number().int());
+
 /** Model output for FLASHCARDS: 3-30 front/back cards. */
 const flashcardsSchema = z.object({
     cards: z
@@ -30,6 +46,7 @@ const flashcardsSchema = z.object({
             z.object({
                 front: z.string(),
                 back: z.string(),
+                sources: sourceNumbers,
             }),
         )
         .min(3)
@@ -45,6 +62,7 @@ const quizSchema = z.object({
                 options: z.array(z.string()).min(2).max(5),
                 correctIndex: z.number().int().min(0),
                 explanation: z.string(),
+                sources: sourceNumbers,
             }),
         )
         .min(3)
@@ -83,6 +101,7 @@ const reportSchema = z.object({
         z.object({
             title: z.string(),
             content: z.string(),
+            sources: sourceNumbers,
         }),
     ),
 });
@@ -246,6 +265,53 @@ function sanitizeWiki(wiki: z.infer<typeof wikiSchema>) {
     return { ...wiki, diagram };
 }
 
+/**
+ * Turns the source numbers a model reported into citations, dropping numbers that match no
+ * source and repeats.
+ *
+ * @param numbers - Source numbers from the model (1-based)
+ * @param sources - The numbered sources the material was built from
+ */
+function toCitations(numbers: number[], sources: ContextSource[]): ArtifactCitation[] {
+    const seen = new Set<number>();
+
+    return numbers.flatMap((marker) => {
+        const source = sources[marker - 1];
+        if (!source || seen.has(marker)) {
+            return [];
+        }
+        seen.add(marker);
+        return [{ marker, sourceId: source.id, label: source.title }];
+    });
+}
+
+/**
+ * Replaces each item's `sources` numbers with resolved `citations`.
+ *
+ * @param items - Items as the model returned them
+ * @param sources - The numbered sources the material was built from
+ */
+function withCitations<T extends { sources: number[] }>(items: T[], sources: ContextSource[]) {
+    return items.map(({ sources: numbers, ...item }) => ({
+        ...item,
+        citations: toCitations(numbers, sources),
+    }));
+}
+
+/**
+ * Citations for a markdown text: the sources its `[n]` markers point at, in order of appearance.
+ *
+ * @param markdown - Text containing markers like `[1]` or `[1, 2]`
+ * @param sources - The numbered sources the material was built from
+ */
+function citationsInMarkdown(markdown: string, sources: ContextSource[]) {
+    const numbers: number[] = [];
+    for (const match of markdown.matchAll(/\[(\d+(?:\s*,\s*\d+)*)\]/g)) {
+        numbers.push(...match[1].split(",").map((part) => Number(part.trim())));
+    }
+    return toCitations(numbers, sources);
+}
+
 /** Builds the source context for learning artifacts and generates their content with the model. */
 export class ArtifactGenerationService {
     /**
@@ -324,7 +390,7 @@ export class ArtifactGenerationService {
                 ? `File tree:\n${GithubRepoClient.renderTree(files.map((file) => file.path))}\n\n`
                 : "";
 
-            return [{ title: source.title, content, header }];
+            return [{ id: source.id, title: source.title, content, header }];
         });
 
         if (withContent.length === 0) {
@@ -348,13 +414,63 @@ export class ArtifactGenerationService {
             })),
         );
 
+        // Numbered so the model can say which source each item is based on.
         const text = fitted
-            .map((source) => `# ${source.title}\n\n${source.content}`)
+            .map((source, index) => `# [${index + 1}] ${source.title}\n\n${source.content}`)
             .join("\n\n---\n\n");
 
         return {
             text,
             sourceIds: selected.map((source) => source.id),
+            /** The sources in the text, in the order of their numbers. */
+            sources: withContent.map((source): ContextSource => ({
+                id: source.id,
+                title: source.title,
+            })),
+        };
+    }
+
+    /**
+     * Builds the material for an artifact made from a conversation: its messages as a transcript.
+     *
+     * The chat's own `[1]` / `[W1]` citation markers are removed, since they would be mistaken
+     * for source numbers. Over {@link ARTIFACT_MAX_CONTEXT_CHARS} the oldest messages are left out.
+     * There are no numbered sources, so the generated items carry no citations.
+     *
+     * @param conversationId - Conversation to read
+     * @param messageIds - Optional subset of its messages
+     * @throws {APIError} BadRequest when there is nothing to learn from
+     */
+    static async gatherConversationContext(conversationId: string, messageIds?: string[]) {
+        const messages = (await MessageRepository.findAllByConversationId(conversationId)).filter(
+            (message) => !messageIds?.length || messageIds.includes(message.id),
+        );
+
+        const lines = messages.map(
+            (message) =>
+                `${message.role === "USER" ? "User" : "Assistant"}: ${message.content
+                    .replace(/\s?\[W?\d+(?:\s*,\s*W?\d+)*\]/g, "")
+                    .trim()}`,
+        );
+
+        // Keep the most recent messages that fit.
+        const kept: string[] = [];
+        let used = 0;
+        for (const line of lines.reverse()) {
+            if (used + line.length > ARTIFACT_MAX_CONTEXT_CHARS - CONTEXT_OVERHEAD_CHARS) {
+                break;
+            }
+            kept.unshift(line);
+            used += line.length;
+        }
+
+        if (kept.length === 0) {
+            throw APIError.BadRequest("This conversation has no messages to learn from yet");
+        }
+
+        return {
+            text: `# Conversation\n\n${kept.join("\n\n")}`,
+            sources: [] as ContextSource[],
         };
     }
 
@@ -363,10 +479,16 @@ export class ArtifactGenerationService {
      *
      * @param type - Artifact type (`SUMMARY`, `QUIZ`, `FLASHCARDS`, etc.)
      * @param sourceText - Combined source material from {@link ArtifactGenerationService.gatherSourceContext}
-     * @returns Type-specific JSON content stored on the artifact row
+     * @param sources - The numbered sources in that material, used to resolve citations
+     * @returns Type-specific JSON content stored on the artifact row. Summaries, flashcards,
+     *   quiz questions and report sections carry `citations` naming the sources they came from
      * @throws {APIError} BadRequest when the artifact type is unsupported
      */
-    static async generateContent(type: ArtifactRecord["type"], sourceText: string) {
+    static async generateContent(
+        type: ArtifactRecord["type"],
+        sourceText: string,
+        sources: ContextSource[] = [],
+    ) {
         const system = artifactSystem(type);
         const telemetry = { functionId: `artifact-${type.toLowerCase()}` };
 
@@ -378,7 +500,10 @@ export class ArtifactGenerationService {
                     telemetry,
                     prompt: ARTIFACT_PROMPTS.SUMMARY(sourceText),
                 });
-                return { markdown: result.text };
+                return {
+                    markdown: result.text,
+                    citations: citationsInMarkdown(result.text, sources),
+                };
             }
             case "TAKEAWAYS": {
                 const result = await generateText({
@@ -398,7 +523,7 @@ export class ArtifactGenerationService {
                     output: Output.object({ schema: flashcardsSchema }),
                     prompt: ARTIFACT_PROMPTS.FLASHCARDS(sourceText),
                 });
-                return result.output;
+                return { cards: withCitations(result.output.cards, sources) };
             }
             case "QUIZ": {
                 const result = await generateText({
@@ -408,7 +533,9 @@ export class ArtifactGenerationService {
                     output: Output.object({ schema: quizSchema }),
                     prompt: ARTIFACT_PROMPTS.QUIZ(sourceText),
                 });
-                return sanitizeQuiz(result.output);
+                return {
+                    questions: withCitations(sanitizeQuiz(result.output).questions, sources),
+                };
             }
             case "MINDMAP": {
                 const result = await generateText({
@@ -428,7 +555,10 @@ export class ArtifactGenerationService {
                     output: Output.object({ schema: reportSchema }),
                     prompt: ARTIFACT_PROMPTS.REPORT(sourceText),
                 });
-                return result.output;
+                return {
+                    markdown: result.output.markdown,
+                    sections: withCitations(result.output.sections, sources),
+                };
             }
             case "WIKI": {
                 const result = await generateText({
