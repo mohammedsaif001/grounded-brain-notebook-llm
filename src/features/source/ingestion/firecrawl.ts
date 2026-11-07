@@ -25,10 +25,17 @@ export class FirecrawlScraper {
             throw APIError.BadRequest("Could not extract content from this URL");
         }
 
+        // Pages describe their author in a few ways; take the first string we find.
+        const metadata = (result.metadata ?? {}) as Record<string, unknown>;
+        const author = [metadata.author, metadata.ogSiteName, metadata.publisher].find(
+            (value): value is string => typeof value === "string" && value.trim() !== "",
+        );
+
         return {
             markdown,
             title: result.metadata?.title,
             sourceUrl: result.metadata?.sourceURL ?? url,
+            author: author?.trim(),
         };
     }
 }

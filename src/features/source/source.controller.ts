@@ -18,12 +18,12 @@ import { workspaceIdParamSchema } from "../workspace/workspace.validator.js";
 
 /** HTTP handlers for `/api/workspaces/:workspaceId/sources`. Each validates input, then delegates to the service. */
 export class SourceController {
-    /** GET `/` — lists sources without content; supports `q`, `type` and `status` filters (200). */
+    /** GET `/` — lists sources without content; `q`, `type`, `status` filters and `limit`/`cursor` paging (200). */
     static list = async (req: Request, res: Response) => {
         const { workspaceId } = workspaceIdParamSchema.parse(req.params);
         const filters = listSourcesQuerySchema.parse(req.query);
-        const sources = await SourceService.list(workspaceId, req.session.user.id, filters);
-        APIResponse.Ok(res, sources);
+        const page = await SourceService.list(workspaceId, req.session.user.id, filters);
+        APIResponse.Page(res, page);
     };
 
     /** GET `/:sourceId` — returns one source including its content (200). */
@@ -99,12 +99,16 @@ export class SourceController {
         APIResponse.NoContent(res);
     };
 
-    /** POST `/bulk-delete` — deletes several sources by id (204). */
+    /** POST `/bulk-delete` — deletes several sources by id and reports the outcome of each (200). */
     static bulkDelete = async (req: Request, res: Response) => {
         const { workspaceId } = workspaceIdParamSchema.parse(req.params);
         const input = bulkDeleteSourcesSchema.parse(req.body);
-        await SourceService.bulkDelete(workspaceId, req.session.user.id, input.sourceIds);
-        APIResponse.NoContent(res);
+        const result = await SourceService.bulkDelete(
+            workspaceId,
+            req.session.user.id,
+            input.sourceIds,
+        );
+        APIResponse.Ok(res, result);
     };
 
     /** GET `/:sourceId/chunks` — returns the indexed chunks and their count (200). */
@@ -139,7 +143,7 @@ export class SourceController {
         APIResponse.Ok(res, result);
     };
 
-    /** POST `/reprocess` — re-queues FAILED sources, optionally limited to `sourceIds` (200). */
+    /** POST `/reprocess` — re-queues FAILED sources, or exactly the given `sourceIds`; reports each (200). */
     static reprocessFailed = async (req: Request, res: Response) => {
         const { workspaceId } = workspaceIdParamSchema.parse(req.params);
         const input = reprocessSourcesSchema.parse(req.body ?? {});

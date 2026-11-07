@@ -1,5 +1,6 @@
 import type { Prisma } from "../../generated/prisma/client.js";
 import prisma from "../../config/db.js";
+import { pageArgs, toPage } from "../../shared/http/pagination.js";
 import type { ListSourcesQuery } from "./source.validator.js";
 
 /** Columns returned for a full source, including its (possibly large) `content`. */
@@ -111,6 +112,45 @@ export class SourceRepository {
             where: buildSourcesWhere(workspaceId, filters),
             select: sourceSummarySelect,
             orderBy: { createdAt: "desc" },
+        });
+    }
+
+    /**
+     * One page of sources without `content`, with the total across all pages.
+     *
+     * Without `limit` the whole list comes back as a single page.
+     *
+     * @param workspaceId - Owning workspace
+     * @param filters - Optional list filters plus `limit` and `cursor`
+     * @returns Sources newest first, the total matching, and the cursor of the next page
+     */
+    static async findPage(workspaceId: string, filters: ListSourcesQuery = {}) {
+        const where = buildSourcesWhere(workspaceId, filters);
+
+        const [rows, total] = await Promise.all([
+            prisma.source.findMany({
+                where,
+                select: sourceSummarySelect,
+                // `id` breaks ties so a cursor always lands on one exact row.
+                orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+                ...pageArgs(filters),
+            }),
+            prisma.source.count({ where }),
+        ]);
+
+        return toPage(rows, total, filters);
+    }
+
+    /**
+     * Finds the given sources that belong to a workspace (ids from elsewhere are ignored).
+     *
+     * @param workspaceId - Owning workspace
+     * @param sourceIds - Ids to look up
+     */
+    static findManyByIds(workspaceId: string, sourceIds: string[]) {
+        return prisma.source.findMany({
+            where: { workspaceId, id: { in: sourceIds } },
+            select: sourceSummarySelect,
         });
     }
 

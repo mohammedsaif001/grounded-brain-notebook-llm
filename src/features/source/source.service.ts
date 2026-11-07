@@ -19,8 +19,12 @@ import type {
     ReprocessSourcesInput,
 } from "./source.validator.js";
 import { SourceChunkRepository } from "./source-chunk.repository.js";
+import { countWords } from "./ingestion/text-stats.js";
 import { SourceProcessingService, type SourceMetadata } from "./source-processing.service.js";
 import { WorkspaceService } from "../workspace/workspace.service.js";
+
+/** Outcome of one id in a bulk request. */
+type BulkResult<Status extends string> = { sourceId: string; status: Status; reason?: string };
 
 /**
  * Metadata stored on a GITHUB source: where it came from, the commit it was read at, and
@@ -36,6 +40,8 @@ function githubMetadata(snapshot: RepoSnapshot): Prisma.InputJsonObject {
         branch: snapshot.branch,
         commitSha: snapshot.commitSha,
         description: snapshot.description,
+        author: snapshot.owner,
+        fileCount: snapshot.files.length,
         totalFiles: snapshot.totalFiles,
         truncated: snapshot.truncated,
         files: snapshot.files.map((file) => ({ path: file.path, size: file.content.length })),
@@ -60,7 +66,16 @@ export class SourceService {
      * @returns The created source (status `PENDING`)
      */
     private static async createAndQueue(data: CreateSourceData) {
-        const source = await SourceRepository.create(data);
+        const source = await SourceRepository.create({
+            ...data,
+            // Known up front for everything whose text is already in hand (not PDFs, until extracted).
+            metadata: data.content
+                ? {
+                      ...(data.metadata as Prisma.InputJsonObject | undefined),
+                      wordCount: countWords(data.content),
+                  }
+                : data.metadata,
+        });
         logger.info(
             { kind: "ingest", sourceId: source.id, workspaceId: source.workspaceId },
             `Source queued: ${source.type} "${source.title}"`,
@@ -75,15 +90,17 @@ export class SourceService {
     }
 
     /**
-     * Lists sources (without content) with optional `q`, `type`, and `status` filters.
+     * Lists sources (without content) with optional `q`, `type`, and `status` filters,
+     * one page at a time when `limit` is given.
      *
      * @param workspaceId - Workspace to list from
-     * @param userId - Requesting user; must own the workspace
-     * @param filters - Optional list filters
+     * @param userId - Requesting user
+     * @param filters - Optional list filters plus `limit` and `cursor`
+     * @returns The page of sources, the total matching, and the next cursor
      */
     static async list(workspaceId: string, userId: string, filters: ListSourcesQuery = {}) {
         await WorkspaceService.getForUser(workspaceId, userId);
-        return SourceRepository.findAllByWorkspaceId(workspaceId, filters);
+        return SourceRepository.findPage(workspaceId, filters);
     }
 
     /**
@@ -227,6 +244,7 @@ export class SourceService {
             status: "PENDING",
             metadata: {
                 importedFrom: scraped.sourceUrl,
+                ...(scraped.author ? { author: scraped.author } : {}),
             },
         });
     }
@@ -247,12 +265,16 @@ export class SourceService {
         return this.createAndQueue({
             workspaceId,
             type: "YOUTUBE",
-            title: input.title || `YouTube: ${transcript.videoId}`,
+            title: input.title || transcript.title || `YouTube: ${transcript.videoId}`,
             content: transcript.content,
             url: input.url,
             status: "PENDING",
             metadata: {
                 videoId: transcript.videoId,
+                ...(transcript.author ? { author: transcript.author } : {}),
+                ...(transcript.durationSeconds
+                    ? { durationSeconds: transcript.durationSeconds }
+                    : {}),
             },
         });
     }
@@ -433,19 +455,44 @@ export class SourceService {
     }
 
     /**
-     * Deletes multiple sources in sequence.
+     * Deletes several sources, one by one, and reports what happened to each.
+     *
+     * Not atomic by design: a missing id or a failure on one source does not stop or undo the
+     * others. Ids are de-duplicated, and ids from other workspaces count as `not_found`.
      *
      * @param workspaceId - Workspace the sources belong to
      * @param userId - Requesting user
      * @param sourceIds - Sources to delete
-     * @throws {APIError} NotFound if any source is missing (earlier ones stay deleted)
+     * @returns How many were deleted and a status for every requested id
      */
     static async bulkDelete(workspaceId: string, userId: string, sourceIds: string[]) {
         await WorkspaceService.getForUser(workspaceId, userId);
 
-        for (const sourceId of sourceIds) {
-            await this.delete(workspaceId, sourceId, userId);
+        const ids = [...new Set(sourceIds)];
+        const existing = new Set(
+            (await SourceRepository.findManyByIds(workspaceId, ids)).map((source) => source.id),
+        );
+
+        const results: BulkResult<"deleted" | "not_found" | "failed">[] = [];
+        for (const sourceId of ids) {
+            if (!existing.has(sourceId)) {
+                results.push({ sourceId, status: "not_found" });
+                continue;
+            }
+
+            try {
+                await this.delete(workspaceId, sourceId, userId);
+                results.push({ sourceId, status: "deleted" });
+            } catch (error) {
+                logger.warn({ kind: "ingest", sourceId, err: error }, "Bulk delete failed");
+                results.push({ sourceId, status: "failed" });
+            }
         }
+
+        return {
+            deleted: results.filter((result) => result.status === "deleted").length,
+            results,
+        };
     }
 
     /**
@@ -492,13 +539,18 @@ export class SourceService {
     }
 
     /**
-     * Re-queues FAILED sources. Without `sourceIds`, every failed source in the workspace
-     * is reprocessed; with them, only the failed sources in that list.
+     * Re-queues sources for indexing.
      *
-     * @param workspaceId - Workspace to search for failed sources
+     * Without `sourceIds`, every FAILED source in the workspace is re-queued. With them, exactly
+     * those sources are re-queued whatever their status, so a selection in the library can include
+     * READY ones; nothing outside the list is touched. Sources that are still PENDING or
+     * PROCESSING are skipped (re-indexing them would race the run in progress), and ids that are
+     * not in this workspace are `not_found`. A failure on one source does not stop the others.
+     *
+     * @param workspaceId - Workspace to search for sources
      * @param userId - Requesting user; must own the workspace
-     * @param input.sourceIds - Optional subset of source ids
-     * @returns Count of sources that were requeued
+     * @param input.sourceIds - Optional explicit list of source ids
+     * @returns Count re-queued and a status for every source considered
      */
     static async reprocessFailed(
         workspaceId: string,
@@ -507,18 +559,50 @@ export class SourceService {
     ) {
         await WorkspaceService.getForUser(workspaceId, userId);
 
-        const sources = await SourceRepository.findAllByWorkspaceId(workspaceId, {
-            status: "FAILED",
-        });
+        const results: BulkResult<"queued" | "skipped" | "not_found" | "failed">[] = [];
+        let targets: { id: string }[];
 
-        const targets = input.sourceIds?.length
-            ? sources.filter((source) => input.sourceIds?.includes(source.id))
-            : sources;
+        if (input.sourceIds?.length) {
+            const ids = [...new Set(input.sourceIds)];
+            const found = await SourceRepository.findManyByIds(workspaceId, ids);
+            const foundIds = new Set(found.map((source) => source.id));
 
-        for (const source of targets) {
-            await this.reprocess(workspaceId, source.id, userId);
+            for (const sourceId of ids) {
+                if (!foundIds.has(sourceId)) {
+                    results.push({ sourceId, status: "not_found" });
+                }
+            }
+
+            targets = found.filter((source) => {
+                if (source.status === "PENDING" || source.status === "PROCESSING") {
+                    results.push({
+                        sourceId: source.id,
+                        status: "skipped",
+                        reason: "Already being processed",
+                    });
+                    return false;
+                }
+                return true;
+            });
+        } else {
+            targets = await SourceRepository.findAllByWorkspaceId(workspaceId, {
+                status: "FAILED",
+            });
         }
 
-        return { reprocessed: targets.length };
+        for (const { id: sourceId } of targets) {
+            try {
+                await this.reprocess(workspaceId, sourceId, userId);
+                results.push({ sourceId, status: "queued" });
+            } catch (error) {
+                logger.warn({ kind: "ingest", sourceId, err: error }, "Reprocess failed");
+                results.push({ sourceId, status: "failed" });
+            }
+        }
+
+        return {
+            reprocessed: results.filter((result) => result.status === "queued").length,
+            results,
+        };
     }
 }

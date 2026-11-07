@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { paginationQuerySchema } from "../../shared/http/pagination.js";
 import { workspaceIdParamSchema } from "../workspace/workspace.validator.js";
 
 /** Source kinds a client may filter by. */
@@ -12,11 +13,12 @@ export const sourceIdParamSchema = workspaceIdParamSchema.extend({
     sourceId: z.string().trim().min(1),
 });
 
-/** Query string for listing sources: free-text `q` (title or content), `type`, `status`. */
+/** Query string for listing sources: free-text `q` (title or content), `type`, `status`, `limit`, `cursor`. */
 export const listSourcesQuerySchema = z.object({
     q: z.string().trim().optional(),
     type: sourceTypeSchema.optional(),
     status: sourceStatusSchema.optional(),
+    ...paginationQuerySchema.shape,
 });
 
 /** Body for a plain-text source. */
@@ -68,7 +70,10 @@ export const bulkDeleteSourcesSchema = z.object({
     sourceIds: z.array(z.string().trim().min(1)).min(1),
 });
 
-/** Body for reprocessing failed sources: optional subset of ids (omit for all failed). */
+/**
+ * Body for reprocessing: without `sourceIds` every FAILED source is re-queued; with them, exactly
+ * those sources are re-queued whatever their status (except ones still being processed).
+ */
 export const reprocessSourcesSchema = z.object({
     sourceIds: z.array(z.string().trim().min(1)).optional(),
 });
