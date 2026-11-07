@@ -8,6 +8,8 @@ model LearningArtifact {
   sourceIds   String[]
   status      ArtifactStatus @default(PENDING)
   metadata    Json?
+  // First time the user opened it; null means "new" (drives the unseen indicator).
+  viewedAt    DateTime?
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
   workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
