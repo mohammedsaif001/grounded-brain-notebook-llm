@@ -95,13 +95,17 @@ cookie jar. Requests must come from the `CLIENT_URL` origin. All `/api/workspace
 
 ```jsonc
 // success
-{ "success": true, "data": { /* resource or list */ }, "message": "optional" }
+{ "success": true, "data": { /* resource or list */ }, "message": "optional", "meta": { /* paginated lists only */ } }
 
 // error
 { "success": false, "error": { "code": "NOT_FOUND", "message": "Workspace not found", "details": { } } }
 ```
 
 - **201** for creates, **202** for accepted async work, **204** (no body) for deletes.
+- **Pagination.** `GET .../sources` and `GET .../artifacts` take `?limit=` (1–100) and `?cursor=`.
+  Without `limit` the whole list comes back, as before. Every response carries
+  `meta: { "total": <matching rows>, "nextCursor": "<id>" | null }`; pass `nextCursor` as `cursor`
+  to get the next page, and stop when it is `null`.
 - `POST /chat` is the exception: it returns a **stream**, not JSON.
 - Every response has an **`X-Request-Id`** header. Send your own `X-Request-Id` to correlate with server logs.
 - Resources that exist but belong to someone else return **404** (not 403).
@@ -235,20 +239,32 @@ Google (`POST /api/auth/sign-in/social` with `{ "provider": "google" }`).
     "id": "cm2abc...",
     "title": "Biology notes",
     "description": "Photosynthesis and respiration",
-    "icon": "🌱",
+    "icon": "sprout",
     "defaultModel": "gpt-4o-mini",
+    "sourceCount": 8,
+    "artifactCount": 6,
     "createdAt": "2026-10-20T10:00:00.000Z",
     "updatedAt": "2026-10-20T10:00:00.000Z"
 }
 ```
 
-| Request          | Endpoint                              | Body                                                                                                     | Success                                    |
-| ---------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| Create workspace | `POST /api/workspaces`                | `title` (1–120, required), `description` (≤500), `icon` (≤8), `defaultModel` (`gpt-4o-mini` \| `gpt-4o`) | **201** workspace                          |
-| List workspaces  | `GET /api/workspaces`                 | –                                                                                                        | **200** array, most recently updated first |
-| Get workspace    | `GET /api/workspaces/:workspaceId`    | –                                                                                                        | **200** workspace                          |
-| Update workspace | `PATCH /api/workspaces/:workspaceId`  | any create field; at least one                                                                           | **200** workspace                          |
-| Delete workspace | `DELETE /api/workspaces/:workspaceId` | –                                                                                                        | **204**                                    |
+`sourceCount` is every source in the notebook, whatever its status; `artifactCount` is every
+artifact (study guide). Both come with the list, so a dashboard needs no per-notebook requests.
+`icon` is any short string up to 8 characters: a key such as `sprout` or `rocket`, or a legacy
+emoji. The server stores it as given; the client decides how to draw it.
+
+| Request           | Endpoint                                   | Body / query                                                                                                            | Success                                                                                   |
+| ----------------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Create workspace  | `POST /api/workspaces`                     | `title` (1–120, required), `description` (≤500), `icon` (≤8), `defaultModel` (`gpt-4o-mini` \| `gpt-4o`)                | **201** workspace                                                                         |
+| List workspaces   | `GET /api/workspaces`                      | `q` (title or description, case-insensitive), `sort` (`updatedAt` \| `createdAt` \| `title`), `order` (`asc` \| `desc`) | **200** array; default `sort=updatedAt`, newest first (`title` defaults to A–Z)           |
+| Get workspace     | `GET /api/workspaces/:workspaceId`         | –                                                                                                                       | **200** workspace                                                                         |
+| Workspace summary | `GET /api/workspaces/:workspaceId/summary` | –                                                                                                                       | **200** `{ sourceCount, readySourceCount, processingArtifactCount, unseenArtifactCount }` |
+| Update workspace  | `PATCH /api/workspaces/:workspaceId`       | any create field; at least one                                                                                          | **200** workspace                                                                         |
+| Delete workspace  | `DELETE /api/workspaces/:workspaceId`      | –                                                                                                                       | **204**                                                                                   |
+
+The summary is cheap enough to poll for the sidebar: `processingArtifactCount` is artifacts still
+`PENDING` or `PROCESSING`, and `unseenArtifactCount` is `READY` artifacts nobody has opened yet
+(see `POST .../artifacts/:artifactId/viewed`).
 
 Deleting a workspace also cancels its running background jobs, deletes its vectors, and (by
 cascade) its sources, chunks, conversations, messages and artifacts.
@@ -295,19 +311,44 @@ Statuses: `PENDING` → `PROCESSING` → `READY` | `FAILED`.
 List responses leave out `content` (it can be very large). See
 [DATABASE.md](DATABASE.md#sourcemetadata-sourcemetadata-in-source-processingservicets) for every `metadata` field.
 
-| Request                      | Endpoint                                        | Body / query                                               | Success                                    |
-| ---------------------------- | ----------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------ |
-| Create TEXT source           | `POST /`                                        | `{ "type": "TEXT", "title" (≤200), "content" }`            | **201** source (`PENDING`)                 |
-| Create MARKDOWN source       | `POST /`                                        | `{ "type": "MARKDOWN", "title", "content" }`               | **201** source (`PENDING`)                 |
-| Wait until source is READY   | `GET /:sourceId`                                | –                                                          | **200**; poll until `status` is `READY`    |
-| List sources                 | `GET /`                                         | –                                                          | **200** array (no `content`), newest first |
-| List sources (filtered)      | `GET /?type=TEXT&status=READY&q=photosynthesis` | `type`, `status`, `q` (title or content, case-insensitive) | **200** array                              |
-| Get source                   | `GET /:sourceId`                                | –                                                          | **200** source with `content`              |
-| Get source chunks            | `GET /:sourceId/chunks`                         | –                                                          | **200** `{ chunks: [...], count }`         |
-| Reprocess one source         | `POST /:sourceId/reprocess`                     | –                                                          | **202** `{ reprocessed: true }`            |
-| Reprocess all FAILED sources | `POST /reprocess`                               | `{}` or `{ "sourceIds": [...] }`                           | **200** `{ reprocessed: <count> }`         |
-| Delete source                | `DELETE /:sourceId`                             | –                                                          | **204**                                    |
-| Bulk delete sources          | `POST /bulk-delete`                             | `{ "sourceIds": ["...", "..."] }` (≥1)                     | **204**                                    |
+| Request                    | Endpoint                                        | Body / query                                                  | Success                                                 |
+| -------------------------- | ----------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------- |
+| Create TEXT source         | `POST /`                                        | `{ "type": "TEXT", "title" (≤200), "content" }`               | **201** source (`PENDING`)                              |
+| Create MARKDOWN source     | `POST /`                                        | `{ "type": "MARKDOWN", "title", "content" }`                  | **201** source (`PENDING`)                              |
+| Wait until source is READY | `GET /:sourceId`                                | –                                                             | **200**; poll until `status` is `READY`                 |
+| List sources               | `GET /`                                         | `limit`, `cursor` (see Pagination)                            | **200** array (no `content`), newest first, plus `meta` |
+| List sources (filtered)    | `GET /?type=TEXT&status=READY&q=photosynthesis` | `type`, `status`, `q` (title or content, case-insensitive)    | **200** array, plus `meta`                              |
+| Get source                 | `GET /:sourceId`                                | –                                                             | **200** source with `content`                           |
+| Get source chunks          | `GET /:sourceId/chunks`                         | –                                                             | **200** `{ chunks: [...], count }`                      |
+| Reprocess one source       | `POST /:sourceId/reprocess`                     | –                                                             | **202** `{ reprocessed: true }`                         |
+| Reprocess sources          | `POST /reprocess`                               | `{}` (all FAILED) or `{ "sourceIds": [...] }` (exactly those) | **200** `{ reprocessed, results }`                      |
+| Delete source              | `DELETE /:sourceId`                             | –                                                             | **204**                                                 |
+| Bulk delete sources        | `POST /bulk-delete`                             | `{ "sourceIds": ["...", "..."] }` (≥1)                        | **200** `{ deleted, results }`                          |
+
+**Bulk behaviour.** Both bulk endpoints are per-id, not all-or-nothing: one bad id never stops or
+undoes the others, and the response lists what happened to every id.
+
+- `POST /bulk-delete` → `{ "deleted": 2, "results": [{ "sourceId", "status": "deleted" | "not_found" | "failed" }] }`.
+  Ids are de-duplicated; ids from other workspaces are `not_found`.
+- `POST /reprocess` without `sourceIds` re-queues every `FAILED` source. With `sourceIds` it re-queues
+  **exactly those** sources whatever their status (so READY ones can be re-indexed too) and touches
+  nothing else. It returns `{ "reprocessed": 2, "results": [{ "sourceId", "status": "queued" | "skipped" | "not_found" | "failed", "reason"? }] }`.
+  A source that is still `PENDING` or `PROCESSING` is `skipped`.
+
+**Normalised `metadata`.** The same keys mean the same thing for every source type; keys that do
+not apply are absent.
+
+| Key               | Meaning                                                                                 | Set for                                                                    |
+| ----------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `author`          | Who wrote or published it: PDF author, YouTube channel, site name, repository owner     | PDF (if the file names one), YOUTUBE, WEBSITE (when the page says), GITHUB |
+| `pageCount`       | Number of pages                                                                         | PDF                                                                        |
+| `wordCount`       | Words in the text (known at once for text, markdown, web pages, videos; PDFs once read) | all                                                                        |
+| `durationSeconds` | Length of the video                                                                     | YOUTUBE                                                                    |
+| `fileCount`       | Files that were read                                                                    | GITHUB                                                                     |
+| `repo`, `owner`   | Repository name and its owner (`owner/repo` is both joined by `/`)                      | GITHUB                                                                     |
+
+Sources imported before these keys existed gain them when reprocessed (`wordCount`, `author` for PDFs).
+YouTube titles now default to the video's real title (fetched best-effort), not `YouTube: <id>`.
 
 Chunk object (from `/chunks`):
 
@@ -539,6 +580,7 @@ If a workspace has no READY sources, chat still answers from general knowledge a
             "sourceType": "TEXT",
             "chunkId": "cm2chk...",
             "chunkIndex": 1,
+            "chunkTotal": 3,
             "excerpt": "The Calvin cycle takes place in the stroma...",
             "score": 0.81
         }
@@ -549,7 +591,14 @@ If a workspace has no READY sources, chat still answers from general knowledge a
 
 User messages have `"role": "USER"` and `"citations": null`. Web citations look like
 `{ "marker": 1, "sourceType": "WEB", "sourceTitle": "...", "url": "...", "excerpt": "..." }`
-and match `[W1]` in the text. PDF citations include `page`.
+and match `[W1]` in the text.
+
+Where the source has them, source citations also carry: `page` (PDFs), `chapter` (PDFs with a
+bookmark outline: the top-level bookmark the page falls under), `section` (WEBSITE and MARKDOWN
+sources: the nearest heading above the chunk) and `chunkTotal` (chunks in the source, for "chunk 12
+of 48"; `chunkIndex` is 0-based). A citation is exactly one chunk, which never spans pages, so there is
+no `pageEnd`. Sources indexed before these fields existed lack `chunkTotal`, `chapter` and `section`
+until they are reprocessed.
 
 ---
 
@@ -603,13 +652,31 @@ with `metadata.processingError`).
 { "type": "QUIZ", "title": "Photosynthesis quiz", "sourceIds": ["cm2src..."] }
 ```
 
-| Field       | Required | Notes                                                                     |
-| ----------- | -------- | ------------------------------------------------------------------------- |
-| `type`      | yes      | `SUMMARY`, `TAKEAWAYS`, `FLASHCARDS`, `QUIZ`, `MINDMAP`, `REPORT`, `WIKI` |
-| `title`     | no       | ≤ 120; default like `Quiz · 10/20/2026`                                   |
-| `sourceIds` | no       | Limit to these sources; default: all READY sources                        |
+```json
+{ "type": "FLASHCARDS", "conversationId": "cm2conv...", "messageIds": ["cm2msg..."] }
+```
 
-**400** `BAD_REQUEST` when there are no READY sources (or none of `sourceIds` are READY).
+| Field            | Required | Notes                                                                                        |
+| ---------------- | -------- | -------------------------------------------------------------------------------------------- |
+| `type`           | yes      | `SUMMARY`, `TAKEAWAYS`, `FLASHCARDS`, `QUIZ`, `MINDMAP`, `REPORT`, `WIKI`                    |
+| `title`          | no       | ≤ 120; default like `Quiz · 10/20/2026`                                                      |
+| `sourceIds`      | no       | Limit to these sources; default: all READY sources                                           |
+| `conversationId` | no       | Build it from this conversation instead of the sources. Not with `sourceIds`; not for `WIKI` |
+| `messageIds`     | no       | Only these messages of the conversation (needs `conversationId`); default: all of them       |
+
+**400** `BAD_REQUEST` when there are no READY sources (or none of `sourceIds` are READY), or the
+conversation has no messages. **404** for a conversation that is not in this workspace.
+
+From a conversation the artifact's `sourceIds` are the sources its replies cited, and
+`metadata.conversationId` records where it came from. Items get empty `citations` arrays, since a
+transcript has no numbered sources.
+
+### Seen / unseen: `POST /:artifactId/viewed`
+
+Records the first time the user opened an artifact (**204**, safe to repeat). `viewedAt` on the
+artifact is `null` until then, and `GET .../summary` counts `READY` artifacts with a `null`
+`viewedAt` as `unseenArtifactCount`. Reading an artifact with `GET` does **not** mark it viewed
+(polling for `READY` would otherwise clear it), so call this when the user actually opens it.
 
 ### Artifact object (READY)
 
@@ -625,33 +692,48 @@ with `metadata.processingError`).
     "sourceIds": ["cm2src..."],
     "status": "READY",
     "metadata": { "generatedAt": "2026-10-20T10:03:10.000Z" },
+    "viewedAt": null,
     "createdAt": "2026-10-20T10:03:00.000Z",
     "updatedAt": "2026-10-20T10:03:10.000Z"
 }
 ```
 
+**Citations.** For `SUMMARY`, `FLASHCARDS`, `QUIZ` and `REPORT`, each card, question and report
+section has a `citations` array saying which sources it is based on; a summary has one `citations`
+array for the whole text, in the order its `[n]` markers first appear:
+
+```json
+{ "marker": 1, "sourceId": "cm2src...", "label": "Make It Stick" }
+```
+
+`marker` is the source's number, the `[1]` in summary text; `label` is the source's title. These
+come from the model, which can be wrong or leave an item uncited (an empty array). Numbers that
+match no source are dropped. There is no page number: the text the model reads has no page
+boundaries.
+
 `content` by type:
 
 | Type         | `content`                                                                                                                                                                                                                 |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SUMMARY`    | `{ "markdown": "..." }`                                                                                                                                                                                                   |
+| `SUMMARY`    | `{ "markdown": "... [1] ...", "citations": [Citation] }`                                                                                                                                                                  |
 | `TAKEAWAYS`  | `{ "items": ["...", "..."] }`                                                                                                                                                                                             |
-| `FLASHCARDS` | `{ "cards": [{ "front", "back" }] }`                                                                                                                                                                                      |
-| `QUIZ`       | `{ "questions": [{ "question", "options": [...], "correctIndex", "explanation" }] }` (`correctIndex` is 0-based)                                                                                                          |
+| `FLASHCARDS` | `{ "cards": [{ "front", "back", "citations": [Citation] }] }`                                                                                                                                                             |
+| `QUIZ`       | `{ "questions": [{ "question", "options": [...], "correctIndex", "explanation", "citations": [Citation] }] }` (`correctIndex` is 0-based)                                                                                 |
 | `MINDMAP`    | `{ "nodes": [{ "id", "label" }], "edges": [{ "id", "source", "target" }] }`                                                                                                                                               |
-| `REPORT`     | `{ "markdown": "...", "sections": [{ "title", "content" }] }`                                                                                                                                                             |
+| `REPORT`     | `{ "markdown": "...", "sections": [{ "title", "content", "citations": [Citation] }] }`                                                                                                                                    |
 | `WIKI`       | `{ "overview", "techStack": [{ "name", "purpose" }], "architecture", "diagram", "modules": [{ "name", "path", "description", "keyFiles" }], "gettingStarted" }` (`diagram` is raw Mermaid; needs a READY `GITHUB` source) |
 
-| Request                                                    | Endpoint                                   | Success                     |
-| ---------------------------------------------------------- | ------------------------------------------ | --------------------------- |
-| Create SUMMARY / TAKEAWAYS / FLASHCARDS / MINDMAP / REPORT | `POST /` with `{ "type": "..." }`          | **201** (`PENDING`)         |
-| Create QUIZ (custom title, selected sources)               | `POST /` with `type`, `title`, `sourceIds` | **201**                     |
-| Wait until artifact is READY                               | `GET /:artifactId` (polls in the Runner)   | **200**                     |
-| Get artifact                                               | `GET /:artifactId`                         | **200**                     |
-| List artifacts                                             | `GET /`                                    | **200** array, newest first |
-| Delete artifact                                            | `DELETE /:artifactId`                      | **204**                     |
-| [400] Unknown type (`"POEM"`)                              | `POST /`                                   | 400 `VALIDATION_ERROR`      |
-| [404] Get nonexistent artifact                             | `GET /does-not-exist`                      | 404                         |
+| Request                                                    | Endpoint                                   | Success                                  |
+| ---------------------------------------------------------- | ------------------------------------------ | ---------------------------------------- |
+| Create SUMMARY / TAKEAWAYS / FLASHCARDS / MINDMAP / REPORT | `POST /` with `{ "type": "..." }`          | **201** (`PENDING`)                      |
+| Create QUIZ (custom title, selected sources)               | `POST /` with `type`, `title`, `sourceIds` | **201**                                  |
+| Wait until artifact is READY                               | `GET /:artifactId` (polls in the Runner)   | **200**                                  |
+| Get artifact                                               | `GET /:artifactId`                         | **200**                                  |
+| List artifacts                                             | `GET /` (`?type=&status=&limit=&cursor=`)  | **200** array, newest first, plus `meta` |
+| Mark artifact opened                                       | `POST /:artifactId/viewed`                 | **204**                                  |
+| Delete artifact                                            | `DELETE /:artifactId`                      | **204**                                  |
+| [400] Unknown type (`"POEM"`)                              | `POST /`                                   | 400 `VALIDATION_ERROR`                   |
+| [404] Get nonexistent artifact                             | `GET /does-not-exist`                      | 404                                      |
 
 ---
 
@@ -700,20 +782,21 @@ With no session, protected routes return **401 `UNAUTHORIZED`**:
 | GET    | `/health/ready`                                                       | –      | 200 / 503    | Readiness                         |
 | *      | `/api/auth/*`                                                         | –      | –            | Better Auth                       |
 | GET    | `/api/me`                                                             | ✓      | 200          | Current user                      |
-| GET    | `/api/workspaces`                                                     | ✓      | 200          |                                   |
+| GET    | `/api/workspaces`                                                     | ✓      | 200          | `?q&sort&order`                   |
 | POST   | `/api/workspaces`                                                     | ✓      | 201          |                                   |
 | GET    | `/api/workspaces/:workspaceId`                                        | ✓      | 200          |                                   |
+| GET    | `/api/workspaces/:workspaceId/summary`                                | ✓      | 200          | Sidebar counts                    |
 | PATCH  | `/api/workspaces/:workspaceId`                                        | ✓      | 200          |                                   |
 | DELETE | `/api/workspaces/:workspaceId`                                        | ✓      | 204          |                                   |
-| GET    | `/api/workspaces/:workspaceId/sources`                                | ✓      | 200          | `?q&type&status`                  |
+| GET    | `/api/workspaces/:workspaceId/sources`                                | ✓      | 200          | `?q&type&status&limit&cursor`     |
 | POST   | `/api/workspaces/:workspaceId/sources`                                | ✓      | 201          | TEXT / MARKDOWN · ingestion limit |
 | POST   | `/api/workspaces/:workspaceId/sources/upload`                         | ✓      | 201          | multipart PDF · ingestion limit   |
 | POST   | `/api/workspaces/:workspaceId/sources/import/website`                 | ✓      | 201          | ingestion limit                   |
 | POST   | `/api/workspaces/:workspaceId/sources/import/youtube`                 | ✓      | 201          | ingestion limit                   |
 | POST   | `/api/workspaces/:workspaceId/sources/import/github`                  | ✓      | 201          | ingestion limit                   |
 | POST   | `/api/workspaces/:workspaceId/sources/import/web-search`              | ✓      | 201          | ingestion limit                   |
-| POST   | `/api/workspaces/:workspaceId/sources/bulk-delete`                    | ✓      | 204          |                                   |
-| POST   | `/api/workspaces/:workspaceId/sources/reprocess`                      | ✓      | 200          | FAILED only · ingestion limit     |
+| POST   | `/api/workspaces/:workspaceId/sources/bulk-delete`                    | ✓      | 200          | Per-id results                    |
+| POST   | `/api/workspaces/:workspaceId/sources/reprocess`                      | ✓      | 200          | FAILED, or the given ids · limit  |
 | GET    | `/api/workspaces/:workspaceId/sources/:sourceId`                      | ✓      | 200          |                                   |
 | DELETE | `/api/workspaces/:workspaceId/sources/:sourceId`                      | ✓      | 204          |                                   |
 | GET    | `/api/workspaces/:workspaceId/sources/:sourceId/chunks`               | ✓      | 200          |                                   |
@@ -725,9 +808,10 @@ With no session, protected routes return **401 `UNAUTHORIZED`**:
 | POST   | `/api/workspaces/:workspaceId/conversations`                          | ✓      | 201          |                                   |
 | GET    | `/api/workspaces/:workspaceId/conversations/:conversationId/messages` | ✓      | 200          |                                   |
 | DELETE | `/api/workspaces/:workspaceId/conversations/:conversationId`          | ✓      | 204          |                                   |
-| GET    | `/api/workspaces/:workspaceId/artifacts`                              | ✓      | 200          |                                   |
+| GET    | `/api/workspaces/:workspaceId/artifacts`                              | ✓      | 200          | `?type&status&limit&cursor`       |
 | POST   | `/api/workspaces/:workspaceId/artifacts`                              | ✓      | 201          | AI limit                          |
 | GET    | `/api/workspaces/:workspaceId/artifacts/:artifactId`                  | ✓      | 200          |                                   |
+| POST   | `/api/workspaces/:workspaceId/artifacts/:artifactId/viewed`           | ✓      | 204          | Clears the unseen state           |
 | DELETE | `/api/workspaces/:workspaceId/artifacts/:artifactId`                  | ✓      | 204          |                                   |
 | GET    | `/api/memory`                                                         | ✓      | 200          |                                   |
 | POST   | `/api/memory`                                                         | ✓      | 201          |                                   |

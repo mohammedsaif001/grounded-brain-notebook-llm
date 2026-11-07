@@ -53,6 +53,10 @@ configured (the server answers 503) are reported as SKIP, not FAIL.
 ### Workspaces
 
 - Create, list, get and update a workspace
+- Every workspace carries `sourceCount` and `artifactCount`
+- Server-side search (`?q=`, case-insensitive) and sort (`?sort=&order=`); a bad `sort` is 400
+- `GET .../summary` returns the four sidebar counts (and is 404 for another user)
+- The icon accepts a short key (up to 8 characters), not just emoji
 - Validation: a blank title and an empty update body return 400 (`VALIDATION_ERROR`)
 - **Isolation:** user B gets 404 for user A's workspace
 
@@ -61,17 +65,21 @@ configured (the server answers 503) are reported as SKIP, not FAIL.
 - Create TEXT and MARKDOWN sources (they start as `PENDING`)
 - A PDF type sent as JSON is rejected
 - The list omits `content`; the `?type=` filter works; get-one includes `content`
+- Pagination: `?limit=` and `?cursor=` page through without overlap, `meta.total` and `meta.nextCursor`
+  are right, and a `limit` of 0 or over 100 is 400
 - **Isolation:** user B gets 404 for user A's source
 - _AI:_ the background job (Inngest) indexes both sources to `READY`
 - _AI:_ chunks exist and have real token counts
 - _AI:_ reprocessing one source returns 202 and it goes back to `READY`
 - _AI:_ reprocessing failed sources is a no-op when none have failed
+- _AI:_ reprocessing an explicit selection re-queues exactly those ids (READY included) and reports
+  unknown ids as `not_found`
 
 ### Chat (RAG), _AI only_
 
 - The first message streams a reply and returns `X-Conversation-Id`
 - A follow-up in the same conversation works (history is loaded server-side)
-- Saved messages carry citations, each with a numeric `marker`
+- Saved messages carry citations, each with a numeric `marker` and, for sources, a `chunkTotal`
 - The conversation is listed with an auto-generated title
 - Empty `messages` is 400
 - **Isolation:** user B gets 404 chatting in user A's workspace
@@ -94,6 +102,14 @@ configured (the server answers 503) are reported as SKIP, not FAIL.
 - _AI:_ generate a **SUMMARY** (markdown) and a **QUIZ** (structured output, `correctIndex`
   in range) through the background job to `READY`
 - A **WIKI** artifact in a workspace with no GitHub source is 400
+- Input rules: `messageIds` needs a `conversationId`, `conversationId` excludes `sourceIds`, a wiki
+  can't come from a conversation, an unknown conversation is 404
+- _AI:_ the summary carries `citations`; every quiz question has a `citations` array
+- _AI:_ opening an artifact with `POST .../viewed` clears it from `unseenArtifactCount` (a plain `GET`
+  does not), and `viewedAt` is set
+- _AI:_ **FLASHCARDS from a conversation**, and **FLASHCARDS from sources** where cards cite real
+  workspace sources
+- Artifact lists paginate and filter by `type` / `status`
 - _AI:_ list artifacts; delete one (204), after which it is 404
 
 ### External integrations, `--external` only

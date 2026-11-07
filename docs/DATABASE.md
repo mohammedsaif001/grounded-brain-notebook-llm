@@ -173,6 +173,7 @@ erDiagram
         String[] sourceIds "soft reference"
         ArtifactStatus status "default PENDING"
         Json metadata "nullable"
+        DateTime viewedAt "nullable, first opened"
         DateTime createdAt
         DateTime updatedAt
     }
@@ -288,6 +289,7 @@ AI-generated study material.
 | `sourceIds` | `String[]`       | Postgres text array of the sources used. **Not a foreign key** (see below) |
 | `status`    | `ArtifactStatus` | Generation lifecycle                                                       |
 | `metadata`  | `Json?`          | `generatedAt`, or `processingError` on failure                             |
+| `viewedAt`  | `DateTime?`      | First time the user opened it; `null` = new (drives the unseen count)      |
 
 **Why `sourceIds` is not a relation:** an artifact is a snapshot. If a source is deleted later,
 the artifact should still exist and still show what it was generated from. A join table with a
@@ -435,6 +437,12 @@ JSON columns hold data whose shape varies by type. TypeScript types for them liv
     "publicId": "grounded_brain_notebook_llm/pdfs/report.pdf", // Cloudinary id, PDF only
     "resourceType": "raw", // Cloudinary resource type
     "pageCount": 12, // PDF only
+    "wordCount": 5400, // words in the text; all types
+    "author": "Barbara Oakley", // PDF author, YouTube channel, site name or repo owner
+    "durationSeconds": 1122, // YouTube only
+    "fileCount": 46, // GitHub only: files read
+    "owner": "vercel",
+    "repo": "next.js", // GitHub only
     "importedFrom": "https://example.com/article", // website URL, or "web-search"
     "sourceUrl": "https://...", // web-search imports
     "videoId": "aircAruvnKk", // YouTube only
@@ -456,8 +464,11 @@ Only sources the answer actually cites (`[1]`, `[W2]`, ...) are stored:
         "sourceTitle": "Photosynthesis",
         "sourceType": "TEXT",
         "chunkId": "cm...",
-        "chunkIndex": 0,
+        "chunkIndex": 0, // 0-based
+        "chunkTotal": 48, // chunks in the source (sources indexed after this field existed)
         "page": 3, // PDFs only
+        "chapter": "Retrieval practice", // PDFs with bookmarks only
+        "section": "Spacing", // WEBSITE / MARKDOWN only: nearest heading above the chunk
         "excerpt": "first 280 chars of the chunk...",
         "score": 0.82, // cosine similarity
     },
@@ -473,18 +484,19 @@ Only sources the answer actually cites (`[1]`, `[W2]`, ...) are stored:
 
 ### `learning_artifact.content` (by `type`)
 
-| Type         | Shape                                                                                                                                     |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `SUMMARY`    | `{ "markdown": "..." }`                                                                                                                   |
-| `TAKEAWAYS`  | `{ "items": ["...", "..."] }` (3–20)                                                                                                      |
-| `FLASHCARDS` | `{ "cards": [{ "front": "...", "back": "..." }] }` (3–30)                                                                                 |
-| `QUIZ`       | `{ "questions": [{ "question": "...", "options": ["..."], "correctIndex": 0, "explanation": "..." }] }` (3–15, `correctIndex` is 0-based) |
-| `MINDMAP`    | `{ "nodes": [{ "id": "...", "label": "..." }], "edges": [{ "id": "...", "source": "nodeId", "target": "nodeId" }] }`                      |
-| `REPORT`     | `{ "markdown": "...", "sections": [{ "title": "...", "content": "..." }] }`                                                               |
+| Type         | Shape                                                                                                                                                              |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `SUMMARY`    | `{ "markdown": "... [1] ...", "citations": [{ "marker": 1, "sourceId": "...", "label": "Source title" }] }`                                                        |
+| `TAKEAWAYS`  | `{ "items": ["...", "..."] }` (3–20)                                                                                                                               |
+| `FLASHCARDS` | `{ "cards": [{ "front": "...", "back": "...", "citations": [Citation] }] }` (3–30)                                                                                 |
+| `QUIZ`       | `{ "questions": [{ "question": "...", "options": ["..."], "correctIndex": 0, "explanation": "...", "citations": [Citation] }] }` (3–15, `correctIndex` is 0-based) |
+| `MINDMAP`    | `{ "nodes": [{ "id": "...", "label": "..." }], "edges": [{ "id": "...", "source": "nodeId", "target": "nodeId" }] }`                                               |
+| `REPORT`     | `{ "markdown": "...", "sections": [{ "title": "...", "content": "...", "citations": [Citation] }] }`                                                               |
 
 ### `learning_artifact.metadata`
 
-`{ "generatedAt": "<ISO date>" }` when READY, or `{ "processingError": "..." }` when FAILED.
+`{ "generatedAt": "<ISO date>" }` when READY, or `{ "processingError": "..." }` when FAILED. An artifact
+built from a conversation also has `conversationId` (and `messageIds` when a subset was chosen).
 
 ---
 
@@ -507,7 +519,10 @@ Each Pinecone vector carries metadata so retrieval needs no Postgres lookup:
     "sourceTitle": "Photosynthesis",
     "sourceType": "PDF",
     "text": "chunk text (max 35,000 chars)",
-    "page": 3,
+    "chunkTotal": 48,
+    "page": 3, // PDFs
+    "chapter": "Retrieval practice", // PDFs with bookmarks
+    "section": "Spacing", // WEBSITE / MARKDOWN
 }
 ```
 
