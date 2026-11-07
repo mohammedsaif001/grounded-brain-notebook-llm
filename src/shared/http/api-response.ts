@@ -4,7 +4,7 @@
  * Every JSON response uses one envelope so clients can handle them uniformly:
  *
  * ```json
- * { "success": true, "data": { ... }, "message": "optional" }
+ * { "success": true, "data": { ... }, "message": "optional", "meta": { ... optional } }
  * { "success": false, "error": { "code": "NOT_FOUND", "message": "...", "details": ... } }
  * ```
  *
@@ -19,6 +19,8 @@ export type APISuccessBody<T> = {
     success: true;
     data: T;
     message?: string;
+    /** Extra information about `data`, e.g. `{ total, nextCursor }` for paginated lists. */
+    meta?: Record<string, unknown>;
 };
 
 /** Shape of every error JSON response. */
@@ -38,12 +40,20 @@ export type APIErrorBody = {
  * @param statusCode - HTTP status to send
  * @param data - Payload placed under `data`
  * @param message - Optional human-readable message
+ * @param meta - Optional extra information placed under `meta`
  */
-function sendSuccess<T>(res: Response, statusCode: number, data: T, message?: string) {
+function sendSuccess<T>(
+    res: Response,
+    statusCode: number,
+    data: T,
+    message?: string,
+    meta?: Record<string, unknown>,
+) {
     const body: APISuccessBody<T> = {
         success: true,
         data,
         ...(message ? { message } : {}),
+        ...(meta ? { meta } : {}),
     };
     res.status(statusCode).json(body);
 }
@@ -56,9 +66,23 @@ export class APIResponse {
      * @param res - Express response
      * @param data - Payload placed under `data`
      * @param message - Optional human-readable message
+     * @param meta - Optional extra information placed under `meta`
      */
-    static Ok<T>(res: Response, data: T, message?: string) {
-        sendSuccess(res, 200, data, message);
+    static Ok<T>(res: Response, data: T, message?: string, meta?: Record<string, unknown>) {
+        sendSuccess(res, 200, data, message, meta);
+    }
+
+    /**
+     * 200 — one page of a list: the items under `data`, `total` and `nextCursor` under `meta`.
+     *
+     * @param res - Express response
+     * @param page - Items plus pagination info from `toPage`
+     */
+    static Page<T>(res: Response, page: { items: T[]; total: number; nextCursor: string | null }) {
+        sendSuccess(res, 200, page.items, undefined, {
+            total: page.total,
+            nextCursor: page.nextCursor,
+        });
     }
 
     /**
