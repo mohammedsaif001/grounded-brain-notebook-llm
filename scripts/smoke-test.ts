@@ -49,6 +49,8 @@ type ApiResponse = {
     body: {
         success?: boolean;
         data?: any;
+        /** Present on paginated lists: `{ total, nextCursor }`. */
+        meta?: any;
         error?: { code: string; message: string; details?: any };
     } | null;
     text: string;
@@ -480,6 +482,48 @@ async function main() {
     await step("get workspace", async () => {
         expectStatus(await a.get(ws()), 200);
     });
+    await step("workspace carries sourceCount and artifactCount", async () => {
+        const res = await a.get("/api/workspaces");
+        const mine = (res.body?.data as any[]).find((w) => w.id === state.workspaceId);
+        expect(
+            typeof mine?.sourceCount === "number" && typeof mine?.artifactCount === "number",
+            "counts missing from the list",
+        );
+        const one = await a.get(ws());
+        expect(typeof one.body?.data?.sourceCount === "number", "counts missing from get");
+    });
+    await step("search and sort the workspace list", async () => {
+        const hit = await a.get("/api/workspaces?q=BIOLOGY");
+        expectStatus(hit, 200);
+        expect(
+            (hit.body?.data as any[]).some((w) => w.id === state.workspaceId),
+            "q is not case-insensitive or does not match the title",
+        );
+        const miss = await a.get("/api/workspaces?q=zzz-no-such-notebook");
+        expect((miss.body?.data as any[]).length === 0, "q did not filter");
+        expectStatus(await a.get("/api/workspaces?sort=title&order=asc"), 200);
+        expectStatus(await a.get("/api/workspaces?sort=updatedAt"), 200);
+        expectStatus(await a.get("/api/workspaces?sort=bogus"), 400);
+    });
+    await step("workspace summary", async () => {
+        const res = await a.get(ws("/summary"));
+        expectStatus(res, 200);
+        const s = res.body?.data;
+        expect(
+            [
+                "sourceCount",
+                "readySourceCount",
+                "processingArtifactCount",
+                "unseenArtifactCount",
+            ].every((key) => typeof s?.[key] === "number"),
+            "summary is missing a count",
+        );
+        expectStatus(await b.get(ws("/summary")), 404);
+    });
+    await step("icon accepts a short key", async () => {
+        expectStatus(await a.patch(ws(), { icon: "compass" }), 200);
+        expectStatus(await a.patch(ws(), { icon: "x".repeat(9) }), 400);
+    });
     await step("update workspace", async () => {
         const res = await a.patch(ws(), {
             title: "Smoke test biology (renamed)",
@@ -528,6 +572,26 @@ async function main() {
             "content included in list",
         );
     });
+    await step("sources paginate with limit and cursor", async () => {
+        const full = await a.get(ws("/sources"));
+        expect(full.body?.meta?.total === 2, `meta.total ${full.body?.meta?.total}`);
+        expect(full.body?.meta?.nextCursor === null, "unpaged list has a nextCursor");
+
+        const first = await a.get(ws("/sources?limit=1"));
+        expectStatus(first, 200);
+        expect((first.body?.data as any[]).length === 1, "page size not applied");
+        expect(first.body?.meta?.total === 2, "total missing");
+        const cursor = first.body?.meta?.nextCursor as string;
+        expect(typeof cursor === "string", "no nextCursor on the first page");
+
+        const second = await a.get(ws(`/sources?limit=1&cursor=${cursor}`));
+        expectStatus(second, 200);
+        expect((second.body?.data as any[]).length === 1, "second page is empty");
+        expect(second.body?.data[0].id !== first.body?.data[0].id, "pages overlap");
+        expect(second.body?.meta?.nextCursor === null, "last page has a nextCursor");
+        expectStatus(await a.get(ws("/sources?limit=0")), 400);
+        expectStatus(await a.get(ws("/sources?limit=101")), 400);
+    });
     await step("list sources with ?type filter", async () => {
         const res = await a.get(ws("/sources?type=TEXT"));
         expectStatus(res, 200);
@@ -568,6 +632,29 @@ async function main() {
             expectStatus(res, 200);
             return `reprocessed: ${res.body?.data?.reprocessed}`;
         });
+        await step("reprocess an explicit selection touches only those ids", async () => {
+            const res = await a.post(ws("/sources/reprocess"), {
+                sourceIds: [state.markdownSourceId, "no-such-source"],
+            });
+            expectStatus(res, 200);
+            const { reprocessed, results } = res.body?.data as {
+                reprocessed: number;
+                results: { sourceId: string; status: string }[];
+            };
+            const statusOf = (id: string) => results.find((r) => r.sourceId === id)?.status;
+            expect(
+                statusOf(state.markdownSourceId) === "queued",
+                "selected READY source not queued",
+            );
+            expect(statusOf("no-such-source") === "not_found", "unknown id not reported");
+            expect(
+                statusOf(state.textSourceId) === undefined,
+                "a source outside the selection was touched",
+            );
+            expect(reprocessed === 1, `reprocessed ${reprocessed}`);
+            await sleep(1_000);
+            await waitForSource(a, state.workspaceId, state.markdownSourceId);
+        });
     }
 
     if (AI) {
@@ -602,6 +689,10 @@ async function main() {
             expect(
                 citations.every((c) => typeof c.marker === "number"),
                 "citation without marker",
+            );
+            expect(
+                citations.every((c) => c.sourceType === "WEB" || typeof c.chunkTotal === "number"),
+                "source citation without chunkTotal",
             );
             return `${citations.length} citations`;
         });
@@ -686,6 +777,13 @@ async function main() {
                         typeof artifact.content?.markdown === "string",
                         "summary has no markdown",
                     );
+                    expect(Array.isArray(artifact.content?.citations), "summary has no citations");
+                    expect(
+                        (artifact.content.citations as any[]).every(
+                            (c) => c.sourceId && c.label && typeof c.marker === "number",
+                        ),
+                        "malformed summary citation",
+                    );
                 } else {
                     const questions = artifact.content?.questions as any[];
                     expect(questions?.length > 0, "quiz has no questions");
@@ -695,10 +793,125 @@ async function main() {
                         ),
                         "correctIndex out of range",
                     );
+                    expect(
+                        questions.every((q) => Array.isArray(q.citations)),
+                        "quiz question without citations array",
+                    );
                 }
                 state[`artifact${type}`] = id;
             });
         }
+        await step("artifact input validation", async () => {
+            expectStatus(
+                await a.post(ws("/artifacts"), { type: "SUMMARY", messageIds: ["m1"] }),
+                400,
+            );
+            expectStatus(
+                await a.post(ws("/artifacts"), {
+                    type: "SUMMARY",
+                    conversationId: "c1",
+                    sourceIds: ["s1"],
+                }),
+                400,
+            );
+            expectStatus(
+                await a.post(ws("/artifacts"), { type: "WIKI", conversationId: "c1" }),
+                400,
+            );
+            expectStatus(
+                await a.post(ws("/artifacts"), { type: "SUMMARY", conversationId: "no-such-chat" }),
+                404,
+            );
+        });
+        if (AI) {
+            await step("viewed tracking clears the unseen count", async () => {
+                if (!state.artifactSUMMARY) throw new Skip("no artifact generated");
+                const before = (await a.get(ws("/summary"))).body?.data;
+                expect(before.unseenArtifactCount >= 1, `unseen ${before.unseenArtifactCount}`);
+                const artifact = (await a.get(ws(`/artifacts/${state.artifactSUMMARY}`))).body
+                    ?.data;
+                expect(artifact.viewedAt === null, "reading an artifact must not mark it viewed");
+                expectStatus(await a.post(ws(`/artifacts/${state.artifactSUMMARY}/viewed`)), 204);
+                expectStatus(await a.post(ws(`/artifacts/${state.artifactSUMMARY}/viewed`)), 204);
+                const after = (await a.get(ws("/summary"))).body?.data;
+                expect(
+                    after.unseenArtifactCount === before.unseenArtifactCount - 1,
+                    `unseen ${before.unseenArtifactCount} -> ${after.unseenArtifactCount}`,
+                );
+                const opened = (await a.get(ws(`/artifacts/${state.artifactSUMMARY}`))).body?.data;
+                expect(typeof opened.viewedAt === "string", "viewedAt not set");
+                expectStatus(await b.post(ws(`/artifacts/${state.artifactSUMMARY}/viewed`)), 404);
+            });
+            await step("generate FLASHCARDS from the conversation", async () => {
+                if (!state.conversationId) throw new Skip("no conversation");
+                const created = await a.post(ws("/artifacts"), {
+                    type: "FLASHCARDS",
+                    conversationId: state.conversationId,
+                });
+                expectStatus(created, 201);
+                const id = created.body?.data?.id as string;
+                const artifact = await poll(
+                    async () => (await a.get(ws(`/artifacts/${id}`))).body?.data,
+                    (x) => x?.status === "READY" || x?.status === "FAILED",
+                    ARTIFACT_TIMEOUT_MS,
+                    INNGEST_HINT,
+                );
+                expect(artifact.status === "READY", `artifact ended ${artifact.status}`);
+                const cards = artifact.content?.cards as any[];
+                expect(cards?.length > 0, "no cards");
+                expect(
+                    cards.every((c) => Array.isArray(c.citations)),
+                    "card without citations array",
+                );
+                expect(
+                    artifact.metadata?.conversationId === state.conversationId,
+                    "conversation not recorded",
+                );
+            });
+            await step("generate FLASHCARDS from sources with per-card citations", async () => {
+                const created = await a.post(ws("/artifacts"), { type: "FLASHCARDS" });
+                expectStatus(created, 201);
+                const id = created.body?.data?.id as string;
+                const artifact = await poll(
+                    async () => (await a.get(ws(`/artifacts/${id}`))).body?.data,
+                    (x) => x?.status === "READY" || x?.status === "FAILED",
+                    ARTIFACT_TIMEOUT_MS,
+                    INNGEST_HINT,
+                );
+                expect(artifact.status === "READY", `artifact ended ${artifact.status}`);
+                const cards = artifact.content?.cards as any[];
+                const cited = cards.filter((c) => c.citations.length > 0);
+                expect(cited.length > 0, "no card cites a source");
+                expect(
+                    cited.every((c) =>
+                        c.citations.every(
+                            (x: any) =>
+                                [state.textSourceId, state.markdownSourceId].includes(x.sourceId) &&
+                                x.label,
+                        ),
+                    ),
+                    "citation does not point at a workspace source",
+                );
+            });
+        }
+        await step("artifacts paginate and filter", async () => {
+            const all = await a.get(ws("/artifacts"));
+            expectStatus(all, 200);
+            const total = all.body?.meta?.total as number;
+            expect(total === (all.body?.data as any[]).length, "meta.total != list length");
+            if (total >= 2) {
+                const page = await a.get(ws("/artifacts?limit=1"));
+                expect((page.body?.data as any[]).length === 1, "page size not applied");
+                expect(typeof page.body?.meta?.nextCursor === "string", "no nextCursor");
+            }
+            const byType = await a.get(ws("/artifacts?type=QUIZ"));
+            expectStatus(byType, 200);
+            expect(
+                (byType.body?.data as any[]).every((x) => x.type === "QUIZ"),
+                "type filter not applied",
+            );
+            expectStatus(await a.get(ws("/artifacts?status=BOGUS")), 400);
+        });
         await step("list and delete artifact", async () => {
             const res = await a.get(ws("/artifacts"));
             expectStatus(res, 200);
@@ -889,9 +1102,19 @@ async function main() {
     begin("Cleanup");
     await step("bulk delete sources", async () => {
         if (KEEP) throw new Skip("--keep");
-        expectStatus(
-            await a.post(ws("/sources/bulk-delete"), { sourceIds: [state.markdownSourceId] }),
-            204,
+        const res = await a.post(ws("/sources/bulk-delete"), {
+            sourceIds: [state.markdownSourceId, state.markdownSourceId, "no-such-source"],
+        });
+        expectStatus(res, 200);
+        const { deleted, results } = res.body?.data as {
+            deleted: number;
+            results: { sourceId: string; status: string }[];
+        };
+        expect(results.length === 2, `ids not de-duplicated (${results.length} results)`);
+        expect(deleted === 1, `deleted ${deleted}`);
+        expect(
+            results.find((r) => r.sourceId === "no-such-source")?.status === "not_found",
+            "unknown id not reported",
         );
         expectStatus(await a.get(ws(`/sources/${state.markdownSourceId}`)), 404);
     });

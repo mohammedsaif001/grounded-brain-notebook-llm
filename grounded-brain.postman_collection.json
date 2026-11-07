@@ -455,6 +455,50 @@
           }
         },
         {
+          "name": "List workspaces (search and sort)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"every notebook has counts\", () => pm.response.json().data.forEach((x) => { pm.expect(x.sourceCount).to.be.a(\"number\"); pm.expect(x.artifactCount).to.be.a(\"number\"); }));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces?q=biology&sort=updatedAt&order=desc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "biology"
+                },
+                {
+                  "key": "sort",
+                  "value": "updatedAt"
+                },
+                {
+                  "key": "order",
+                  "value": "desc"
+                }
+              ]
+            },
+            "description": "Server-side search and sort. `q` matches title or description (case-insensitive); `sort` is `updatedAt` (default), `createdAt` or `title`; `order` is `asc` or `desc`. Each workspace carries `sourceCount` and `artifactCount`."
+          }
+        },
+        {
           "name": "Get workspace",
           "event": [
             {
@@ -482,6 +526,38 @@
               ]
             },
             "description": "Returns one workspace owned by the signed-in user. Another user's workspace returns 404."
+          }
+        },
+        {
+          "name": "Workspace summary",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"has the four counts\", () => { const s = pm.response.json().data; [\"sourceCount\", \"readySourceCount\", \"processingArtifactCount\", \"unseenArtifactCount\"].forEach((k) => pm.expect(s[k]).to.be.a(\"number\")); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/summary",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "summary"
+              ]
+            },
+            "description": "Counts for the sidebar: all sources, READY sources, artifacts still generating, and finished artifacts not opened yet."
           }
         },
         {
@@ -686,6 +762,41 @@
             },
             "description": "Unknown ids (and other users' workspaces) return 404 `NOT_FOUND`."
           }
+        },
+        {
+          "name": "[400] Invalid sort field",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces?sort=bogus",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces"
+              ],
+              "query": [
+                {
+                  "key": "sort",
+                  "value": "bogus"
+                }
+              ]
+            },
+            "description": "`sort` must be `updatedAt`, `createdAt` or `title`."
+          }
         }
       ]
     },
@@ -860,6 +971,44 @@
               ]
             },
             "description": "Summaries only: `content` is omitted (fetch one source to get it)."
+          }
+        },
+        {
+          "name": "List sources (paginated)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"page size applied and meta present\", () => { const b = pm.response.json(); pm.expect(b.data.length).to.be.at.most(1); pm.expect(b.meta.total).to.be.a(\"number\"); pm.expect(b.meta).to.have.property(\"nextCursor\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources?limit=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "sources"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "`limit` (1-100) turns paging on; pass `meta.nextCursor` as `cursor` for the next page. Without `limit` the whole list is returned. `meta.total` counts all matching rows."
           }
         },
         {
@@ -1052,6 +1201,53 @@
               ]
             },
             "description": "Body `{}` retries every `FAILED` source in the workspace; pass `sourceIds` to retry specific ones. Returns `{ reprocessed: <count> }`."
+          }
+        },
+        {
+          "name": "Reprocess selected sources",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"reports each id\", () => { const d = pm.response.json().data; pm.expect(d.reprocessed).to.be.a(\"number\"); pm.expect(d.results).to.be.an(\"array\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/sources/reprocess",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "sources",
+                "reprocess"
+              ]
+            },
+            "description": "With `sourceIds`, exactly those sources are re-queued whatever their status (READY included); sources still being processed are `skipped`, unknown ids `not_found`. Without `sourceIds`, every FAILED source is re-queued.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceIds\": [\n    \"{{sourceId2}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
           }
         },
         {
@@ -2649,6 +2845,51 @@
           }
         },
         {
+          "name": "Create FLASHCARDS from a conversation",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/artifacts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "artifacts"
+              ]
+            },
+            "description": "Builds the artifact from a conversation instead of the sources. `messageIds` (optional) limits it to some of its messages. Not allowed together with `sourceIds`, nor for WIKI.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"FLASHCARDS\",\n  \"conversationId\": \"{{conversationId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
           "name": "Create WIKI (GitHub repo)",
           "event": [
             {
@@ -2850,6 +3091,81 @@
               ]
             },
             "description": "All artifacts in the workspace, newest first."
+          }
+        },
+        {
+          "name": "List artifacts (paginated, filtered)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"meta present\", () => pm.expect(pm.response.json().meta.total).to.be.a(\"number\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/artifacts?type=QUIZ&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "artifacts"
+              ],
+              "query": [
+                {
+                  "key": "type",
+                  "value": "QUIZ"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Optional `type`, `status`, `limit` and `cursor`. `meta` carries `total` and `nextCursor`."
+          }
+        },
+        {
+          "name": "Mark artifact opened",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/workspaces/{{workspaceId}}/artifacts/{{artifactId}}/viewed",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "workspaces",
+                "{{workspaceId}}",
+                "artifacts",
+                "{{artifactId}}",
+                "viewed"
+              ]
+            },
+            "description": "Records the first time the user opened the artifact; clears it from `unseenArtifactCount`. Safe to repeat. Reading with GET does not mark it viewed."
           }
         },
         {
@@ -3320,7 +3636,8 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));"
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"per-id results\", () => { const d = pm.response.json().data; pm.expect(d.deleted).to.be.a(\"number\"); pm.expect(d.results).to.be.an(\"array\"); });"
                 ]
               }
             }
@@ -3355,7 +3672,7 @@
                 "bulk-delete"
               ]
             },
-            "description": "Body: `sourceIds` (at least one)."
+            "description": "Body: `sourceIds` (at least one). Not all-or-nothing: the response lists `deleted` / `not_found` / `failed` for every id."
           }
         },
         {
