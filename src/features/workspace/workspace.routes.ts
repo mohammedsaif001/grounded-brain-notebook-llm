@@ -11,5 +11,6 @@ workspaceRouter.use(requireAuth);
 workspaceRouter.get("/", asyncHandler(WorkspaceController.list));
 workspaceRouter.post("/", asyncHandler(WorkspaceController.create));
 workspaceRouter.get("/:workspaceId", asyncHandler(WorkspaceController.get));
+workspaceRouter.get("/:workspaceId/summary", asyncHandler(WorkspaceController.summary));
 workspaceRouter.patch("/:workspaceId", asyncHandler(WorkspaceController.update));
 workspaceRouter.delete("/:workspaceId", asyncHandler(WorkspaceController.delete));

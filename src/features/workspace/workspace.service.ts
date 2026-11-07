@@ -3,17 +3,37 @@ import { logger } from "../../config/logger.js";
 import { WorkspaceRepository, type WorkspaceRecord } from "./workspace.repository.js";
 import { VectorRepository } from "../../shared/ai/vector.repository.js";
 import { APIError } from "../../shared/http/api-error.js";
-import type { CreateWorkspaceInput, UpdateWorkspaceInput } from "./workspace.validator.js";
+import type {
+    CreateWorkspaceInput,
+    ListWorkspacesQuery,
+    UpdateWorkspaceInput,
+} from "./workspace.validator.js";
 
 /** Workspace business logic. Also the ownership gate used by every workspace-scoped service. */
 export class WorkspaceService {
     /**
-     * Lists the user's workspaces, most recently updated first.
+     * Lists the user's workspaces with their item counts, searched and sorted as asked.
      *
      * @param userId - Owner's user id
+     * @param query - Optional search text, sort field and direction
      */
-    static listForUser(userId: string): Promise<WorkspaceRecord[]> {
-        return WorkspaceRepository.findAllByUserId(userId);
+    static listForUser(
+        userId: string,
+        query: Partial<ListWorkspacesQuery> = {},
+    ): Promise<WorkspaceRecord[]> {
+        return WorkspaceRepository.findAllByUserId(userId, query);
+    }
+
+    /**
+     * Small activity summary for the sidebar (source counts, artifacts generating or unseen).
+     *
+     * @param workspaceId - Workspace to summarise
+     * @param userId - Requesting user
+     * @throws {APIError} NotFound when the workspace is not found for this user
+     */
+    static async summary(workspaceId: string, userId: string) {
+        await this.getForUser(workspaceId, userId);
+        return WorkspaceRepository.summary(workspaceId);
     }
 
     /**

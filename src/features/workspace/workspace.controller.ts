@@ -3,16 +3,25 @@ import { WorkspaceService } from "./workspace.service.js";
 import { APIResponse } from "../../shared/http/api-response.js";
 import {
     createWorkspaceSchema,
+    listWorkspacesQuerySchema,
     updateWorkspaceSchema,
     workspaceIdParamSchema,
 } from "./workspace.validator.js";
 
 /** HTTP handlers for `/api/workspaces`. Each validates input, then delegates to the service. */
 export class WorkspaceController {
-    /** GET `/` — lists the signed-in user's workspaces (200). */
+    /** GET `/` — lists the signed-in user's workspaces; supports `q`, `sort` and `order` (200). */
     static list = async (req: Request, res: Response) => {
-        const workspaces = await WorkspaceService.listForUser(req.session.user.id);
+        const query = listWorkspacesQuerySchema.parse(req.query);
+        const workspaces = await WorkspaceService.listForUser(req.session.user.id, query);
         APIResponse.Ok(res, workspaces);
+    };
+
+    /** GET `/:workspaceId/summary` — source and artifact counts for the sidebar (200). */
+    static summary = async (req: Request, res: Response) => {
+        const { workspaceId } = workspaceIdParamSchema.parse(req.params);
+        const summary = await WorkspaceService.summary(workspaceId, req.session.user.id);
+        APIResponse.Ok(res, summary);
     };
 
     /** GET `/:workspaceId` — returns one workspace owned by the user (200). */
