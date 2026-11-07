@@ -18,10 +18,16 @@ export type VectorMetadata = {
     sourceId: string;
     chunkId: string;
     chunkIndex: number;
+    /** Chunks in the source this one belongs to, so a citation can say "chunk 12 of 48". */
+    chunkTotal?: number;
     sourceTitle: string;
     sourceType: string;
     text: string;
     page?: number;
+    /** PDF chapter (top-level bookmark) the chunk falls under. */
+    chapter?: string;
+    /** Markdown heading the chunk falls under (WEBSITE and MARKDOWN sources). */
+    section?: string;
     /** File path within a repository (GITHUB sources). */
     path?: string;
 };

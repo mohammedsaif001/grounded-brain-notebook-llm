@@ -42,6 +42,9 @@ async function split(text: string) {
     return parts.map((part) => part.trim()).filter(Boolean);
 }
 
+/** Matches a markdown heading line; captures its text. */
+const HEADING_PATTERN = /^#{1,6}[ \t]+(.+?)[ \t#]*$/gm;
+
 /** Splits extracted text into embedding-sized chunks. */
 export class TextChunker {
     /**
@@ -63,19 +66,66 @@ export class TextChunker {
     }
 
     /**
+     * Chunks markdown, tagging each chunk with the heading it sits under (`metadata.section`).
+     *
+     * Chunks before the first heading have no section.
+     *
+     * @param text - Markdown text, e.g. a scraped web page
+     * @returns Chunks in document order
+     */
+    static async chunkMarkdown(text: string): Promise<TextChunk[]> {
+        const body = text.trim();
+        const headings = [...body.matchAll(HEADING_PATTERN)].map((match) => ({
+            at: match.index,
+            title: match[1].trim(),
+        }));
+        const parts = await split(body);
+
+        // Chunks overlap, so each search starts at the previous chunk's start, not its end.
+        let from = 0;
+        let section: string | undefined;
+
+        return parts.map((content, index) => {
+            const found = body.indexOf(content, from);
+            if (found !== -1) {
+                from = found;
+                section = headings.filter((heading) => heading.at <= found).pop()?.title;
+            }
+
+            return {
+                index,
+                content,
+                tokenCount: tokenizer.encode(content).length,
+                ...(section ? { metadata: { section } } : {}),
+            };
+        });
+    }
+
+    /**
      * Chunks a multi-page document (e.g. PDF pages) while preserving page numbers.
      *
      * Chunks never span two pages, every chunk gets `metadata.page` (1-based), and
-     * `index` is numbered globally across pages. Empty pages are skipped.
+     * `index` is numbered globally across pages. Empty pages are skipped. When the document has
+     * an outline, chunks also get `metadata.chapter`: the last chapter that started on or
+     * before their page.
      *
      * @param pages - Array of page texts, e.g. from `PdfExtractor`
-     * @returns Chunks tagged with their page number
+     * @param outline - Chapter entries (title and start page), in page order
+     * @returns Chunks tagged with their page number and chapter
      */
-    static async chunkPages(pages: string[]): Promise<TextChunk[]> {
+    static async chunkPages(
+        pages: string[],
+        outline: { title: string; page: number }[] = [],
+    ): Promise<TextChunk[]> {
         const chunks: TextChunk[] = [];
 
         for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
-            const pageChunks = await this.chunkText(pages[pageIndex], { page: pageIndex + 1 });
+            const page = pageIndex + 1;
+            const chapter = outline.filter((entry) => entry.page <= page).pop()?.title;
+            const pageChunks = await this.chunkText(pages[pageIndex], {
+                page,
+                ...(chapter ? { chapter } : {}),
+            });
 
             for (const chunk of pageChunks) {
                 chunks.push({ ...chunk, index: chunks.length });

@@ -19,7 +19,8 @@ import type { Prisma } from "../../generated/prisma/client.js";
 import { TextChunker } from "./ingestion/chunking.js";
 import { EmbeddingClient } from "../../shared/ai/embeddings.js";
 import { GithubRepoClient } from "./ingestion/github.js";
-import { PdfExtractor } from "./ingestion/pdf.js";
+import { PdfExtractor, type PdfOutlineEntry } from "./ingestion/pdf.js";
+import { countWords } from "./ingestion/text-stats.js";
 import type { VectorMetadata } from "../../config/pinecone.js";
 import { SourceChunkRepository, type SourceChunkRecord } from "./source-chunk.repository.js";
 import { SourceRepository, type SourceRecord } from "./source.repository.js";
@@ -40,6 +41,14 @@ export type SourceMetadata = {
     processingError?: string;
     chunkCount?: number;
     pageCount?: number;
+    /** Words in the source text. */
+    wordCount?: number;
+    /** Who wrote or published it: PDF author, YouTube channel, site name, repository owner. */
+    author?: string;
+    /** YOUTUBE sources: length of the video in seconds. */
+    durationSeconds?: number;
+    /** GITHUB sources: number of files that were read (`repo` is the repository name, `owner` its owner). */
+    fileCount?: number;
     indexedAt?: string;
     /** GITHUB sources: where the repository was read from. */
     owner?: string;
@@ -63,6 +72,9 @@ export type SourceMetadata = {
 function readMetadata(metadata: SourceRecord["metadata"]): SourceMetadata {
     return metadata && typeof metadata === "object" && !Array.isArray(metadata) ? metadata : {};
 }
+
+/** PDF-only details, absent for every other kind of source. */
+const noPdfInfo = { author: undefined, outline: [] as PdfOutlineEntry[] };
 
 /** The steps of the source indexing pipeline, plus index cleanup helpers. */
 export class SourceProcessingService {
@@ -128,6 +140,8 @@ export class SourceProcessingService {
                 pageCount: extracted.pageCount,
                 pages: extracted.pages,
                 files: undefined,
+                author: extracted.author,
+                outline: extracted.outline,
             };
         }
 
@@ -138,11 +152,11 @@ export class SourceProcessingService {
             if (files.length === 0) {
                 throw new Error(`Source ${source.id} has no repository files`);
             }
-            return { text, pageCount: undefined, pages: undefined, files };
+            return { text, pageCount: undefined, pages: undefined, files, ...noPdfInfo };
         }
 
         if (text) {
-            return { text, pageCount: undefined, pages: undefined, files: undefined };
+            return { text, pageCount: undefined, pages: undefined, files: undefined, ...noPdfInfo };
         }
 
         throw new Error(`Source ${source.id} has no extractable content`);
@@ -171,6 +185,8 @@ export class SourceProcessingService {
             metadata: {
                 ...metadata,
                 pageCount: extracted.pageCount ?? metadata.pageCount,
+                wordCount: countWords(extracted.text),
+                author: extracted.author ?? metadata.author,
             },
         });
 
@@ -179,8 +195,10 @@ export class SourceProcessingService {
         const chunks = extracted.files?.length
             ? await TextChunker.chunkFiles(extracted.files)
             : extracted.pages?.length
-              ? await TextChunker.chunkPages(extracted.pages)
-              : await TextChunker.chunkText(extracted.text);
+              ? await TextChunker.chunkPages(extracted.pages, extracted.outline)
+              : source.type === "MARKDOWN" || source.type === "WEBSITE"
+                ? await TextChunker.chunkMarkdown(extracted.text)
+                : await TextChunker.chunkText(extracted.text);
 
         if (chunks.length === 0) {
             throw new Error("No chunks were generated from source content");
@@ -237,8 +255,15 @@ export class SourceProcessingService {
                         sourceTitle: source.title,
                         sourceType: source.type,
                         text: chunk.content.slice(0, 35000),
+                        chunkTotal: chunks.length,
                         ...(typeof chunkMetadata.page === "number"
                             ? { page: chunkMetadata.page }
+                            : {}),
+                        ...(typeof chunkMetadata.chapter === "string"
+                            ? { chapter: chunkMetadata.chapter }
+                            : {}),
+                        ...(typeof chunkMetadata.section === "string"
+                            ? { section: chunkMetadata.section }
                             : {}),
                         ...(typeof chunkMetadata.path === "string"
                             ? { path: chunkMetadata.path }
