@@ -66,8 +66,18 @@ export const createArtifactSchema = z
         }
     });
 
+/** Body for bulk deletion: 1-100 artifact ids. */
+export const bulkDeleteArtifactsSchema = z
+    .object({
+        artifactIds: z.array(z.string().trim().min(1)).min(1).max(100),
+    })
+    .strict();
+
 /** Validated query for listing artifacts. */
 export type ListArtifactsQuery = z.infer<typeof listArtifactsQuerySchema>;
+
+/** Validated body for bulk-deleting artifacts. */
+export type BulkDeleteArtifactsInput = z.infer<typeof bulkDeleteArtifactsSchema>;
 
 /** Validated body for creating an artifact. */
 export type CreateArtifactInput = z.infer<typeof createArtifactSchema>;

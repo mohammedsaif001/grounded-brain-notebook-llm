@@ -87,6 +87,19 @@ export class ArtifactRepository {
     }
 
     /**
+     * Finds the given artifacts that belong to a workspace (ids from elsewhere are ignored).
+     *
+     * @param workspaceId - Owning workspace
+     * @param artifactIds - Ids to look up
+     */
+    static findManyByIds(workspaceId: string, artifactIds: string[]) {
+        return prisma.learningArtifact.findMany({
+            where: { workspaceId, id: { in: artifactIds } },
+            select: { id: true },
+        });
+    }
+
+    /**
      * Records the first time an artifact was opened; later calls change nothing.
      *
      * @param artifactId - Artifact that was opened

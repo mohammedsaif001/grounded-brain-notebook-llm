@@ -5,6 +5,7 @@ import type { CreateArtifactInput, ListArtifactsQuery } from "./artifact.validat
 import { ArtifactGenerationService } from "./artifact-generation.service.js";
 import { ConversationService } from "../conversation/conversation.service.js";
 import { WorkspaceService } from "../workspace/workspace.service.js";
+import { logger } from "../../config/logger.js";
 import type { Prisma } from "../../generated/prisma/client.js";
 
 /** Default artifact titles by type, used when the client doesn't send one. */
@@ -188,6 +189,49 @@ export class ArtifactService {
     static async delete(workspaceId: string, artifactId: string, userId: string) {
         await this.get(workspaceId, artifactId, userId);
         await ArtifactRepository.delete(artifactId);
+    }
+
+    /**
+     * Deletes several artifacts, one by one, and reports what happened to each.
+     *
+     * Not atomic by design: a missing id or a failure on one artifact does not stop or undo the
+     * others. Ids are de-duplicated, and ids from other workspaces count as `not_found`.
+     *
+     * @param workspaceId - Workspace the artifacts belong to
+     * @param userId - Requesting user; must own the workspace
+     * @param artifactIds - Artifacts to delete
+     * @returns How many were deleted and a status for every requested id
+     */
+    static async bulkDelete(workspaceId: string, userId: string, artifactIds: string[]) {
+        await WorkspaceService.getForUser(workspaceId, userId);
+
+        const ids = [...new Set(artifactIds)];
+        const existing = new Set(
+            (await ArtifactRepository.findManyByIds(workspaceId, ids)).map(
+                (artifact) => artifact.id,
+            ),
+        );
+
+        const results: { artifactId: string; status: "deleted" | "not_found" | "failed" }[] = [];
+        for (const artifactId of ids) {
+            if (!existing.has(artifactId)) {
+                results.push({ artifactId, status: "not_found" });
+                continue;
+            }
+
+            try {
+                await ArtifactRepository.delete(artifactId);
+                results.push({ artifactId, status: "deleted" });
+            } catch (error) {
+                logger.warn({ kind: "artifact", artifactId, err: error }, "Bulk delete failed");
+                results.push({ artifactId, status: "failed" });
+            }
+        }
+
+        return {
+            deleted: results.filter((result) => result.status === "deleted").length,
+            results,
+        };
     }
 
     /**

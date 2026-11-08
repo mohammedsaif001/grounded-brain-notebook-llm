@@ -8,6 +8,8 @@ export const artifactRouter = Router({ mergeParams: true });
 
 artifactRouter.get("/", asyncHandler(ArtifactController.list));
 artifactRouter.post("/", aiRateLimiter, asyncHandler(ArtifactController.create));
+// Static path registered before `/:artifactId` so it isn't captured as an id.
+artifactRouter.post("/bulk-delete", asyncHandler(ArtifactController.bulkDelete));
 artifactRouter.get("/:artifactId", asyncHandler(ArtifactController.get));
 artifactRouter.post("/:artifactId/viewed", asyncHandler(ArtifactController.markViewed));
 artifactRouter.delete("/:artifactId", asyncHandler(ArtifactController.delete));

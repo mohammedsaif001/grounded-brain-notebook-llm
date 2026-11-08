@@ -3,6 +3,7 @@ import { ArtifactService } from "./artifact.service.js";
 import { APIResponse } from "../../shared/http/api-response.js";
 import {
     artifactIdParamSchema,
+    bulkDeleteArtifactsSchema,
     createArtifactSchema,
     listArtifactsQuerySchema,
 } from "./artifact.validator.js";
@@ -38,6 +39,18 @@ export class ArtifactController {
         const input = createArtifactSchema.parse(req.body);
         const artifact = await ArtifactService.create(workspaceId, req.session.user.id, input);
         APIResponse.Created(res, artifact);
+    };
+
+    /** POST `/bulk-delete` — deletes several artifacts by id and reports the outcome of each (200). */
+    static bulkDelete = async (req: Request, res: Response) => {
+        const { workspaceId } = workspaceIdParamSchema.parse(req.params);
+        const input = bulkDeleteArtifactsSchema.parse(req.body);
+        const result = await ArtifactService.bulkDelete(
+            workspaceId,
+            req.session.user.id,
+            input.artifactIds,
+        );
+        APIResponse.Ok(res, result);
     };
 
     /** DELETE `/:artifactId` — deletes an artifact (204). */
