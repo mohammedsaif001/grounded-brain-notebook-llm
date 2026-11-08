@@ -87,6 +87,24 @@ configured (the server answers 503) are reported as SKIP, not FAIL.
 ### Conversations
 
 - Create an empty conversation and delete it (204)
+- Rename a conversation (title trimmed; blank, over-long, empty body and unknown keys are 400; user B and
+  unknown ids are 404)
+
+### Source editing and chunk exclusion
+
+Runs in its own workspace so its facts do not leak into the other tests.
+
+- `PATCH` validation (empty body, blank/over-long title, empty content, unknown keys, bad
+  `expectedUpdatedAt`), unknown source 404, user B 404
+- Content edit of a non-text source is 400; a source that is still processing is 409
+- _AI:_ a **title edit** keeps the source `READY` without re-indexing, and chat citations show the new title
+- _AI:_ a stale `expectedUpdatedAt` is 409 `CONFLICT`; two simultaneous edits from one version: exactly
+  one wins
+- _AI:_ a **content edit** replaces the text: the old fact is gone from every chunk and from the chat
+  answer, and only the new fact is retrievable (nothing is appended)
+- _AI:_ editing with identical content does not re-index
+- _AI:_ chunk list includes `excluded`; `PATCH` chunk validation and ownership; an **excluded chunk is
+  skipped by retrieval** and comes back when re-included
 
 ### Memory (Mem0)
 
@@ -110,7 +128,24 @@ configured (the server answers 503) are reported as SKIP, not FAIL.
 - _AI:_ **FLASHCARDS from a conversation**, and **FLASHCARDS from sources** where cards cite real
   workspace sources
 - Artifact lists paginate and filter by `type` / `status`
+- `PATCH` / regenerate / bulk-delete validation and unknown-id behaviour (no AI needed)
+- _AI:_ generated titles replace the date default; a custom title is kept
 - _AI:_ list artifacts; delete one (204), after which it is 404
+
+### Artifact editing and regeneration, _AI only_
+
+- User B gets 404 on edit and regenerate
+- A rename keeps the content and does not mark it edited
+- Content is validated against the artifact's own type with field-level details (`content.questions.0.correctIndex`),
+  unknown keys and wrong shapes are 400, and a rejected edit changes nothing
+- A valid edit is saved, citations are kept as sent, `metadata.userEdited` and `editedAt` are set
+- Stale `expectedUpdatedAt` is 409 `CONFLICT`; two simultaneous edits: exactly one wins
+- MINDMAP: dangling edges and duplicate node ids are 400
+- An artifact that is still generating is 409 for edit and regenerate
+- Regenerating an edited artifact without `force` is 409 `ARTIFACT_EDITED`; with `force` it is 202 `PENDING`,
+  keeps its id and title, returns to `READY`, and clears the edit flag; an unedited one needs no `force`
+- `?q=` filters by title case-insensitively and combines with `type` and paging
+- Bulk delete: per-id results, duplicates collapsed, unknown ids `not_found`
 
 ### External integrations, `--external` only
 
