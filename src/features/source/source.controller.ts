@@ -14,6 +14,7 @@ import {
     reprocessSourcesSchema,
     sourceIdParamSchema,
     updateChunkSchema,
+    updateSourceSchema,
     uploadPdfBodySchema,
 } from "./source.validator.js";
 import { workspaceIdParamSchema } from "../workspace/workspace.validator.js";
@@ -92,6 +93,19 @@ export class SourceController {
         const input = importWebSearchSchema.parse(req.body);
         const source = await SourceService.importWebSearch(workspaceId, req.session.user.id, input);
         APIResponse.Created(res, source);
+    };
+
+    /** PATCH `/:sourceId` — edits the title and/or (text, markdown) content; returns the source (200). */
+    static update = async (req: Request, res: Response) => {
+        const { workspaceId, sourceId } = sourceIdParamSchema.parse(req.params);
+        const input = updateSourceSchema.parse(req.body);
+        const source = await SourceService.update(
+            workspaceId,
+            sourceId,
+            req.session.user.id,
+            input,
+        );
+        APIResponse.Ok(res, source);
     };
 
     /** DELETE `/:sourceId` — deletes a source and its vectors/chunks (204). */

@@ -52,6 +52,7 @@ sourceRouter.post(
 );
 
 sourceRouter.get("/:sourceId", asyncHandler(SourceController.get));
+sourceRouter.patch("/:sourceId", ingestionRateLimiter, asyncHandler(SourceController.update));
 sourceRouter.delete("/:sourceId", asyncHandler(SourceController.delete));
 sourceRouter.get("/:sourceId/chunks", asyncHandler(SourceController.getChunks));
 sourceRouter.patch("/:sourceId/chunks/:chunkId", asyncHandler(SourceController.updateChunk));

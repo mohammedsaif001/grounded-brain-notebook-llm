@@ -7,7 +7,12 @@ import { GithubRepoClient, type RepoSnapshot } from "./ingestion/github.js";
 import { PdfExtractor } from "./ingestion/pdf.js";
 import { PdfValidator } from "./ingestion/pdf-validator.js";
 import { YoutubeClient } from "./ingestion/youtube.js";
-import { SourceRepository, type CreateSourceData, type SourceRecord } from "./source.repository.js";
+import {
+    SourceRepository,
+    type CreateSourceData,
+    type SourceRecord,
+    type UpdateSourceData,
+} from "./source.repository.js";
 import { APIError } from "../../shared/http/api-error.js";
 import type {
     CreateSourceInput,
@@ -17,6 +22,7 @@ import type {
     ImportYoutubeInput,
     ListSourcesQuery,
     ReprocessSourcesInput,
+    UpdateSourceInput,
 } from "./source.validator.js";
 import { SourceChunkRepository } from "./source-chunk.repository.js";
 import { VectorRepository } from "../../shared/ai/vector.repository.js";
@@ -532,6 +538,141 @@ export class SourceService {
     static async getChunks(workspaceId: string, sourceId: string, userId: string) {
         await this.get(workspaceId, sourceId, userId);
         return SourceProcessingService.listChunks(sourceId);
+    }
+
+    /**
+     * Edits a source's title and/or content.
+     *
+     * - Title only: the title is saved and the vectors' `sourceTitle` metadata is updated so chat
+     *   citations show it; nothing is re-embedded.
+     * - Content (TEXT and MARKDOWN only): the text is saved, the old chunks and vectors are
+     *   removed, and the source goes back through the normal ingestion pipeline (`PENDING`).
+     *
+     * The write is a single compare-and-set on `updatedAt` and status, so a concurrent edit or a
+     * processing run can never be overwritten by a stale read. Sending the content the source
+     * already has does not trigger a re-index.
+     *
+     * @param workspaceId - Workspace the source belongs to
+     * @param sourceId - Source to edit
+     * @param userId - Requesting user
+     * @param input - New title and/or content, and the `updatedAt` the client last saw
+     * @returns The updated source including its content
+     * @throws {APIError} NotFound, BadRequest when content is sent for a non-text source,
+     *   Conflict while the source is queued or processing, `CONFLICT` when it changed elsewhere
+     */
+    static async update(
+        workspaceId: string,
+        sourceId: string,
+        userId: string,
+        input: UpdateSourceInput,
+    ) {
+        const source = await this.get(workspaceId, sourceId, userId);
+
+        if (input.content !== undefined && source.type !== "TEXT" && source.type !== "MARKDOWN") {
+            throw APIError.BadRequest("Content can only be edited for text and markdown sources");
+        }
+        if (source.status === "PENDING" || source.status === "PROCESSING") {
+            throw APIError.Conflict("This source is still being processed");
+        }
+        if (
+            input.expectedUpdatedAt &&
+            new Date(input.expectedUpdatedAt).getTime() !== source.updatedAt.getTime()
+        ) {
+            throw APIError.StaleWrite();
+        }
+
+        const titleChanged = input.title !== undefined && input.title !== source.title;
+        const contentChanged = input.content !== undefined && input.content !== source.content;
+
+        if (!titleChanged && !contentChanged) {
+            return source;
+        }
+
+        const data: UpdateSourceData = {};
+        if (titleChanged) {
+            data.title = input.title;
+        }
+        if (contentChanged) {
+            const { processingError: _cleared, ...metadata } = readMetadata(source.metadata);
+            data.content = input.content;
+            data.status = "PENDING";
+            data.metadata = {
+                ...metadata,
+                wordCount: countWords(input.content as string),
+            };
+        }
+
+        // Title only: point the vectors at the new title before committing it, so the database
+        // never holds a title the citations don't show. Undone if the commit loses a race.
+        const retitleVectors = titleChanged && !contentChanged && source.status === "READY";
+        const chunkIds = retitleVectors
+            ? await SourceChunkRepository.findIdsBySourceId(sourceId)
+            : [];
+        if (retitleVectors) {
+            await this.retitleVectors(workspaceId, chunkIds, input.title as string, source.title);
+        }
+
+        const updated = await SourceRepository.updateIfCurrent(
+            sourceId,
+            workspaceId,
+            source.updatedAt,
+            data,
+        );
+
+        if (!updated) {
+            if (retitleVectors) {
+                await VectorRepository.updateSourceTitle(workspaceId, chunkIds, source.title).catch(
+                    (error) =>
+                        logger.warn(
+                            { kind: "ingest", sourceId, err: error },
+                            "Retitle undo failed",
+                        ),
+                );
+            }
+            throw APIError.StaleWrite();
+        }
+
+        if (contentChanged) {
+            try {
+                await SourceProcessingService.removeFromIndex(workspaceId, sourceId);
+                await EventPublisher.sourceCreated({ sourceId, workspaceId });
+            } catch (error) {
+                await SourceProcessingService.markFailed(sourceId, error);
+                throw error;
+            }
+        }
+
+        logger.info(
+            { kind: "ingest", sourceId, workspaceId, titleChanged, contentChanged },
+            "Source edited",
+        );
+
+        return updated;
+    }
+
+    /**
+     * Writes a new title into a source's vectors; if that fails part-way, puts the old title back
+     * on a best-effort basis so citations stay consistent, then rethrows.
+     *
+     * @param workspaceId - Namespace containing the vectors
+     * @param chunkIds - Vector ids of the source's chunks
+     * @param title - The new title
+     * @param previousTitle - The title to restore on failure
+     */
+    private static async retitleVectors(
+        workspaceId: string,
+        chunkIds: string[],
+        title: string,
+        previousTitle: string,
+    ) {
+        try {
+            await VectorRepository.updateSourceTitle(workspaceId, chunkIds, title);
+        } catch (error) {
+            await VectorRepository.updateSourceTitle(workspaceId, chunkIds, previousTitle).catch(
+                () => undefined,
+            );
+            throw error;
+        }
     }
 
     /**
