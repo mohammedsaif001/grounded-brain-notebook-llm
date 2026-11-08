@@ -404,16 +404,16 @@ Each feature has the same files: `*.routes.ts`, `*.controller.ts`, `*.validator.
 
 ## API at a glance
 
-| Feature       | Base path                           | Highlights                                                                                                                          |
-| ------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Health        | `/health`, `/health/ready`          | Liveness; readiness of every dependency                                                                                             |
-| Auth          | `/api/auth/*`, `/api/me`            | Better Auth sign-up/sign-in/sign-out, Google OAuth                                                                                  |
-| Workspaces    | `/api/workspaces`                   | CRUD                                                                                                                                |
-| Sources       | `/api/workspaces/:id/sources`       | Text/markdown, PDF upload, website, YouTube, GitHub repo (import, sync, files), web results; list/filter, chunks, reprocess, delete |
-| Chat          | `/api/workspaces/:id/chat`          | Streamed, cited answers; optional web search                                                                                        |
-| Conversations | `/api/workspaces/:id/conversations` | List, create, message history with citations, delete                                                                                |
-| Artifacts     | `/api/workspaces/:id/artifacts`     | Generate and fetch study material                                                                                                   |
-| Memory        | `/api/memory`                       | List, add, edit, delete memories                                                                                                    |
+| Feature       | Base path                           | Highlights                                                                                                                                                                       |
+| ------------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Health        | `/health`, `/health/ready`          | Liveness; readiness of every dependency                                                                                                                                          |
+| Auth          | `/api/auth/*`, `/api/me`            | Better Auth sign-up/sign-in/sign-out, Google OAuth                                                                                                                               |
+| Workspaces    | `/api/workspaces`                   | CRUD                                                                                                                                                                             |
+| Sources       | `/api/workspaces/:id/sources`       | Text/markdown, PDF upload, website, YouTube, GitHub repo (import, sync, files), web results; list/filter, edit title or text, chunks (exclude from retrieval), reprocess, delete |
+| Chat          | `/api/workspaces/:id/chat`          | Streamed, cited answers; optional web search                                                                                                                                     |
+| Conversations | `/api/workspaces/:id/conversations` | List, create, rename, message history with citations, delete                                                                                                                     |
+| Artifacts     | `/api/workspaces/:id/artifacts`     | Generate, fetch, edit, regenerate, search and bulk-delete study material                                                                                                         |
+| Memory        | `/api/memory`                       | List, add, edit, delete memories                                                                                                                                                 |
 
 Every JSON response uses the envelope `{ success, data }` or `{ success, error: { code, message, details } }`.
 
