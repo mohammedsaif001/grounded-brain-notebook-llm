@@ -711,7 +711,45 @@ sequenceDiagram
   clears `processingError`, re-publishes `source/created`.
 - `POST /reprocess` (200): does the same for every `FAILED` source (or only those in `sourceIds`).
 - `DELETE /:sourceId` (204): publishes `source/deleted`, removes vectors and chunks, deletes the row.
-- `POST /bulk-delete` (204): deletes each listed source in turn.
+- `POST /bulk-delete` (200): deletes each listed source in turn and reports every id.
+
+#### Editing a source
+
+`PATCH /:sourceId` changes the title and/or, for TEXT and MARKDOWN sources, the content.
+The edit **replaces** what was indexed; it never appends.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant SS as SourceService
+    participant PG as Postgres
+    participant PC as Pinecone
+    participant IN as Inngest
+
+    C->>SS: PATCH /sources/:id {title?, content?, expectedUpdatedAt?}
+    SS->>PG: load source (ownership), reject non-text content (400), PENDING/PROCESSING (409)
+    alt title only
+        SS->>PC: update sourceTitle on each chunk vector (no re-embedding)
+        SS->>PG: compare-and-set UPDATE where updatedAt = read value and status is idle
+    else content changed
+        SS->>PG: compare-and-set UPDATE content, wordCount, status PENDING
+        SS->>PG: delete chunks
+        SS->>PC: delete vectors for the source
+        SS->>IN: send source/created
+        IN->>PG: re-chunk, re-embed, upsert, READY
+    end
+    SS-->>C: 200 source (same shape as GET, with content)
+```
+
+- The write is one `UPDATE ... WHERE id AND updatedAt = <what was read> AND status NOT IN (PENDING,
+PROCESSING)`. If it matches no row the request is a **409 `CONFLICT`**, so a stale tab or a
+  concurrent edit can never overwrite newer data.
+- A title-only edit updates the vectors first, then commits; if the commit loses a race the old title is
+  written back. Nothing is re-embedded.
+- Excluding a chunk (`PATCH .../chunks/:chunkId`) updates `excluded` in Postgres and in the vector's
+  Pinecone metadata. `VectorRepository.query` filters `excluded != true`, and
+  `SourceService.listReadyWithContent` rebuilds a source's text from its non-excluded chunks for artifacts.
 
 ### 8.3 Chat (RAG)
 
@@ -909,6 +947,43 @@ sequenceDiagram
   (fewer than 3 valid → throw, so Inngest retries); mind-map edges pointing at unknown nodes,
   self-loops and duplicates are removed so the client graph can't crash.
 - `sourceIds` is stored on the artifact as a snapshot, not a foreign key.
+- **Titles:** the default `Mind Map · <date>` title is replaced, when generation finishes, by a short
+  model-written title (`ArtifactGenerationService.generateTitle`, best effort: a failure keeps the default).
+  A title the user chose is never touched.
+
+#### Editing and regenerating
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant AS as ArtifactService
+    participant PG as Postgres
+    participant IN as Inngest
+
+    C->>AS: PATCH /artifacts/:id {title?, content?, expectedUpdatedAt?}
+    AS->>PG: load (ownership), require READY (409)
+    AS->>AS: validate content with the schema of the artifact's own type (400 + field details)
+    AS->>PG: compare-and-set UPDATE (updatedAt, status READY), metadata.userEdited = true
+    AS-->>C: 200 artifact
+
+    C->>AS: POST /artifacts/:id/regenerate {force?}
+    alt edited and not force
+        AS-->>C: 409 ARTIFACT_EDITED
+    else
+        AS->>PG: compare-and-set status PENDING (same id and title)
+        AS->>IN: send artifact/generate
+        AS-->>C: 202 artifact (PENDING)
+        IN->>PG: PROCESSING, then READY (userEdited cleared) or FAILED
+    end
+```
+
+- `content` is checked against `artifactContentSchemas[type]` in `artifact-content.schema.ts`. It is built from
+  the same item shapes as the generation schemas (the model's `sources` numbers become stored
+  `citations`), so a field added to a type is validated on generation and on edit.
+- MINDMAP edits must also keep node ids unique and every edge on existing nodes.
+- Regenerate re-reads the sources recorded in `sourceIds` (or the conversation in `metadata`), so it
+  picks up edited sources and excluded chunks. Old content stays visible until the new content lands.
 
 ### 8.7 Health checks
 
