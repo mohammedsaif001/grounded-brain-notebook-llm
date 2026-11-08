@@ -19,6 +19,7 @@ import type {
     ReprocessSourcesInput,
 } from "./source.validator.js";
 import { SourceChunkRepository } from "./source-chunk.repository.js";
+import { VectorRepository } from "../../shared/ai/vector.repository.js";
 import { countWords } from "./ingestion/text-stats.js";
 import { SourceProcessingService, type SourceMetadata } from "./source-processing.service.js";
 import { WorkspaceService } from "../workspace/workspace.service.js";
@@ -531,6 +532,45 @@ export class SourceService {
     static async getChunks(workspaceId: string, sourceId: string, userId: string) {
         await this.get(workspaceId, sourceId, userId);
         return SourceProcessingService.listChunks(sourceId);
+    }
+
+    /**
+     * Excludes a chunk from chat retrieval and artifact generation, or puts it back.
+     *
+     * Nothing is re-embedded: the vector keeps its place in the index and only its `excluded`
+     * metadata changes, which the retrieval query filters on. The vector is updated first, so
+     * the database never claims a chunk is excluded while it can still be retrieved. Excluded
+     * flags do not survive a re-index, because re-indexing creates new chunks.
+     *
+     * @param workspaceId - Workspace the source belongs to
+     * @param sourceId - Source the chunk belongs to
+     * @param chunkId - Chunk to update
+     * @param userId - Requesting user
+     * @param excluded - Whether the chunk should be left out
+     * @returns The updated chunk
+     * @throws {APIError} NotFound for an unknown source or chunk, Conflict while the source is
+     *   still being processed (its chunks are about to be replaced)
+     */
+    static async setChunkExcluded(
+        workspaceId: string,
+        sourceId: string,
+        chunkId: string,
+        userId: string,
+        excluded: boolean,
+    ) {
+        const source = await this.get(workspaceId, sourceId, userId);
+
+        if (source.status === "PENDING" || source.status === "PROCESSING") {
+            throw APIError.Conflict("This source is still being processed");
+        }
+
+        const chunk = await SourceChunkRepository.findByIdAndSourceId(chunkId, sourceId);
+        if (!chunk) {
+            throw APIError.NotFound("Chunk not found");
+        }
+
+        await VectorRepository.updateMetadata(workspaceId, chunkId, { excluded });
+        return SourceChunkRepository.setExcluded(chunkId, excluded);
     }
 
     /**

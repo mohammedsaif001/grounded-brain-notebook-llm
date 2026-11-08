@@ -54,6 +54,7 @@ sourceRouter.post(
 sourceRouter.get("/:sourceId", asyncHandler(SourceController.get));
 sourceRouter.delete("/:sourceId", asyncHandler(SourceController.delete));
 sourceRouter.get("/:sourceId/chunks", asyncHandler(SourceController.getChunks));
+sourceRouter.patch("/:sourceId/chunks/:chunkId", asyncHandler(SourceController.updateChunk));
 sourceRouter.get("/:sourceId/files", asyncHandler(SourceController.getGithubFiles));
 sourceRouter.post(
     "/:sourceId/sync",

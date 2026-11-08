@@ -13,6 +13,11 @@ export const sourceIdParamSchema = workspaceIdParamSchema.extend({
     sourceId: z.string().trim().min(1),
 });
 
+/** Route params for chunk-specific endpoints (`:workspaceId`, `:sourceId` and `:chunkId`). */
+export const chunkIdParamSchema = sourceIdParamSchema.extend({
+    chunkId: z.string().trim().min(1),
+});
+
 /** Query string for listing sources: free-text `q` (title or content), `type`, `status`, `limit`, `cursor`. */
 export const listSourcesQuerySchema = z.object({
     q: z.string().trim().optional(),
@@ -84,6 +89,13 @@ export const importWebSearchSchema = z.object({
     content: z.string().trim().min(1),
     url: z.string().trim().url(),
 });
+
+/** Body for excluding a chunk from (or returning it to) retrieval and artifact generation. */
+export const updateChunkSchema = z
+    .object({
+        excluded: z.boolean(),
+    })
+    .strict();
 
 /** Validated input for creating a text/markdown source. */
 export type CreateSourceInput = z.infer<typeof createSourceSchema>;

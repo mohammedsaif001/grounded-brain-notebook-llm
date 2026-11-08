@@ -4,6 +4,7 @@ import { APIError } from "../../shared/http/api-error.js";
 import { APIResponse } from "../../shared/http/api-response.js";
 import {
     bulkDeleteSourcesSchema,
+    chunkIdParamSchema,
     createSourceSchema,
     importGithubSchema,
     importWebSearchSchema,
@@ -12,6 +13,7 @@ import {
     listSourcesQuerySchema,
     reprocessSourcesSchema,
     sourceIdParamSchema,
+    updateChunkSchema,
     uploadPdfBodySchema,
 } from "./source.validator.js";
 import { workspaceIdParamSchema } from "../workspace/workspace.validator.js";
@@ -116,6 +118,20 @@ export class SourceController {
         const { workspaceId, sourceId } = sourceIdParamSchema.parse(req.params);
         const result = await SourceService.getChunks(workspaceId, sourceId, req.session.user.id);
         APIResponse.Ok(res, result);
+    };
+
+    /** PATCH `/:sourceId/chunks/:chunkId` — excludes or re-includes a chunk; returns it (200). */
+    static updateChunk = async (req: Request, res: Response) => {
+        const { workspaceId, sourceId, chunkId } = chunkIdParamSchema.parse(req.params);
+        const { excluded } = updateChunkSchema.parse(req.body);
+        const chunk = await SourceService.setChunkExcluded(
+            workspaceId,
+            sourceId,
+            chunkId,
+            req.session.user.id,
+            excluded,
+        );
+        APIResponse.Ok(res, chunk);
     };
 
     /** POST `/:sourceId/reprocess` — re-indexes one source in the background (202). */
