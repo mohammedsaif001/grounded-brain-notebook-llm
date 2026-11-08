@@ -55,6 +55,17 @@ function contentErrors(error: z.ZodError) {
     return details;
 }
 
+/**
+ * Whether a title is still the date-based default given at creation (`Mind Map · 8/11/2026`),
+ * as opposed to one the user chose or the model already wrote.
+ *
+ * @param type - Artifact type
+ * @param title - Current title
+ */
+function isDefaultTitle(type: ArtifactRecord["type"], title: string) {
+    return title.startsWith(`${DEFAULT_ARTIFACT_TITLES[type]} \u00b7 `);
+}
+
 /** Learning artifact business logic: CRUD plus the background generation entry point. */
 export class ArtifactService {
     /**
@@ -380,9 +391,15 @@ export class ArtifactService {
                 context.sources,
             );
 
+            // Replace the date-based default title with one that names the topic.
+            const title = isDefaultTitle(artifact.type, artifact.title)
+                ? await ArtifactGenerationService.generateTitle(artifact.type, content)
+                : null;
+
             return ArtifactRepository.update(artifactId, {
                 status: "READY",
                 content,
+                ...(title ? { title } : {}),
                 metadata: {
                     ...(origin.conversationId
                         ? { conversationId: origin.conversationId, messageIds: origin.messageIds }
