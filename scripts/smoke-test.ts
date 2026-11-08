@@ -720,6 +720,31 @@ async function main() {
         expectStatus(await a.delete(ws(`/conversations/${res.body?.data?.id}`)), 204);
     });
 
+    await step("rename a conversation", async () => {
+        const created = await a.post(ws("/conversations"), { title: "Before" });
+        expectStatus(created, 201);
+        const path = ws(`/conversations/${created.body?.data?.id}`);
+
+        const renamed = await a.patch(path, { title: "  After rename  " });
+        expectStatus(renamed, 200);
+        expect(renamed.body?.data?.title === "After rename", "title not trimmed and saved");
+        expect(renamed.body?.data?.id === created.body?.data?.id, "different conversation");
+
+        expectStatus(await a.patch(path, { title: "" }), 400);
+        expectStatus(await a.patch(path, { title: "x".repeat(121) }), 400);
+        expectStatus(await a.patch(path, {}), 400);
+        expectStatus(await a.patch(path, { title: "ok", summary: "nope" }), 400);
+        expectStatus(await b.patch(path, { title: "hijack" }), 404);
+        expectStatus(await a.patch(ws("/conversations/no-such-chat"), { title: "x" }), 404);
+
+        const listed = (await a.get(ws("/conversations"))).body?.data as any[];
+        expect(
+            listed.find((c) => c.id === created.body?.data?.id)?.title === "After rename",
+            "rename not persisted",
+        );
+        expectStatus(await a.delete(path), 204);
+    });
+
     begin("Memory");
     await step("create memory", async () => {
         const res = await a.post("/api/memory", { memory: "Prefers short answers with examples." });
