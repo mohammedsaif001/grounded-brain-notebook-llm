@@ -1,333 +1,178 @@
-# UI handover: backend changes for UI Revamp 2.0
+# UI handover: editing, regeneration and chunk control
 
-All 10 items in `grounded-brain-ui/docs/backend-requirements.md` are implemented and tested. This
-file is the contract: what each endpoint returns now, how to use it, and where the data is
-limited. Full reference: [API.md](API.md). Everything below was verified against a running
-server (smoke test: 58 checks, including real AI generation).
+This file covers **only this change**. The earlier handover (counts, pagination, bulk endpoints,
+citations, conversation artifacts) is already delivered and lives in git history. Full reference for
+every endpoint: [API.md](API.md).
 
-Base URL in dev: `http://localhost:8080`. Auth is the existing Better Auth cookie session; every
-call below needs it and is scoped to the signed-in user (other users' data is 404).
+Base URL in dev: `http://localhost:8080`. Auth is the existing Better Auth cookie session; every call
+below is scoped to the signed-in user (other users' data is 404). All paths are under
+`/api/workspaces/:workspaceId`.
+
+Envelope (unchanged): `{ "success": true, "data": ... }` or
+`{ "success": false, "error": { "code", "message", "details"? } }`.
 
 ## 0. Read this first: what changed for existing code
 
-| Change                                                                                                                       | Impact on the UI                                                                              |
-| ---------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `POST .../sources/bulk-delete` now returns **200** with a body, not **204**                                                  | Code that checks `status === 204` breaks. Read `data.results` instead.                        |
-| `POST .../sources/reprocess` with `sourceIds` now re-queues **exactly those ids, any status** (it used to ignore non-FAILED) | The library bulk bar can reprocess a READY selection. Response is `{ reprocessed, results }`. |
-| Paginated lists add a top-level **`meta`** next to `data`                                                                    | `data` is still a plain array, so old code keeps working.                                     |
-| Workspaces now include `sourceCount` and `artifactCount`                                                                     | Additive.                                                                                     |
-| SUMMARY / FLASHCARDS / QUIZ / REPORT `content` gains `citations`                                                             | Additive. Old artifacts simply lack it (see section 9).                                       |
+| Change                                                                                | Impact on the UI                                                                                 |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Chunk objects from `GET /sources/:id/chunks` gain **`excluded`** (boolean)            | Additive.                                                                                        |
+| `GET /artifacts` accepts `?q=` (title search)                                         | Additive. With no params the response is unchanged.                                              |
+| New 409 code **`ARTIFACT_EDITED`**, and `CONFLICT` now also means "changed elsewhere" | Branch on `error.code`, not just the status.                                                     |
+| Newly generated artifacts get a short topic title instead of `Quiz · 11/8/2026`       | The title changes once, when the artifact reaches `READY`. Titles you set are never overwritten. |
+| Artifact `metadata` may now contain `userEdited: true` and `editedAt`                 | Use it to show an "edited" badge.                                                                |
 
-Envelope (unchanged): `{ "success": true, "data": ..., "message"?, "meta"? }` or
-`{ "success": false, "error": { "code", "message", "details"? } }`.
+## 1. Endpoint contract
 
-## 1. Notebook counts and search/sort (items 1, 10)
+| Endpoint                                   | Request body                                                                                                                   | Success                                                           | Errors                                                                                                        |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `PATCH /sources/:sourceId`                 | `{ title?: 1-200, content?: non-empty string, expectedUpdatedAt?: ISO }`; at least one of title/content; unknown keys rejected | **200** source (same shape as `GET /sources/:id`, with `content`) | 400 validation; 400 content sent for a non-text source; 404; 409 while `PENDING`/`PROCESSING`; 409 `CONFLICT` |
+| `PATCH /sources/:sourceId/chunks/:chunkId` | `{ excluded: boolean }`                                                                                                        | **200** chunk                                                     | 400; 404 unknown source or chunk; 409 while the source is processing                                          |
+| `PATCH /artifacts/:artifactId`             | `{ title?: 1-200, content?: object, expectedUpdatedAt?: ISO }`; at least one; `type` is not editable                           | **200** artifact (same shape as `GET /artifacts/:id`)             | 400 validation with field-level `details`; 404; 409 unless `READY`; 409 `CONFLICT`                            |
+| `POST /artifacts/:artifactId/regenerate`   | `{ force?: boolean }`                                                                                                          | **202** artifact with `status: "PENDING"`                         | 400 no READY sources left; 404; 409 `ARTIFACT_EDITED`; 409 already generating                                 |
+| `GET /artifacts`                           | query: `q`, `type`, `status`, `limit`, `cursor`                                                                                | **200** `{ data: [...], meta: { total, nextCursor } }`            | 400 invalid query                                                                                             |
+| `POST /artifacts/bulk-delete`              | `{ artifactIds: string[1-100] }`                                                                                               | **200** `{ deleted, results: [{ artifactId, status }] }`          | 400; 404 workspace                                                                                            |
+| `PATCH /conversations/:conversationId`     | `{ title: 1-120 }`                                                                                                             | **200** conversation                                              | 400; 404                                                                                                      |
 
-`GET /api/workspaces?q=&sort=&order=`
+`status` in bulk results is `"deleted" | "not_found" | "failed"`. Bulk delete is per-id, not atomic;
+duplicate ids collapse and ids from other workspaces are `not_found`. Read `results` for per-row errors.
 
-- `q`: case-insensitive match on title **or** description (max 120 chars).
-- `sort`: `updatedAt` (default) | `createdAt` | `title`. Anything else is 400.
-- `order`: `asc` | `desc`. Default: `desc` for dates, `asc` for `title`.
+## 2. Editing a source
 
-```json
-{
-    "id": "...",
-    "title": "Learning how to learn",
-    "description": null,
-    "icon": "brain",
-    "defaultModel": "gpt-4o-mini",
-    "sourceCount": 8,
-    "artifactCount": 6,
-    "createdAt": "...",
-    "updatedAt": "..."
-}
-```
+- **Title (any source type):** instant. The source stays `READY`, no re-index. Chat citations show the
+  new title from the next message on; older messages keep the title they were saved with.
+- **Content (TEXT and MARKDOWN only):** the new text **replaces** the old. The backend deletes the old
+  chunks and vectors and re-indexes from the new text, so old and new versions can never both be
+  retrieved. The response is the source with `status: "PENDING"`. Poll `GET /sources/:id` until
+  `READY`; until then chat has no text from this source. Show it as "re-indexing".
+- Sending the same content the source already has changes nothing (200, no re-index).
+- For PDF, website, YouTube and GitHub sources, hide or disable the content editor: the API returns
+  400 "Content can only be edited for text and markdown sources". Title editing stays available.
+- A source that is `PENDING` or `PROCESSING` cannot be edited (409). Disable the edit action while it
+  is indexing.
+- Artifacts already generated keep what they were built from. Offer "regenerate" after a source edit.
 
-- `sourceCount` = every source regardless of status. `artifactCount` = every artifact, any status
-  (including PENDING/FAILED), so "6 study guides" can include one still generating. If the card
-  should only show finished ones, use `GET .../summary` or filter `GET .../artifacts?status=READY`.
-- Counts are also on `GET /api/workspaces/:id`, `POST` and `PATCH` responses.
-- `updatedAt` only changes when the workspace row itself is edited, **not** when sources or
-  artifacts are added. A "Last updated" sort therefore means "last edited", not "last activity".
-  Tell me if you want it to follow activity; it is a small backend change.
+## 3. Optimistic concurrency (sources and artifacts)
 
-## 2. Icon contract (item 7)
-
-No change was needed: `icon` already accepts any trimmed string up to **8 characters** (not
-restricted to emoji). All the keys you listed fit (`compass`, `library` are 7). 9+ characters is 400. The server stores it verbatim and never validates against a list, so unknown keys must fall
-back to a default icon in the UI.
-
-## 3. Workspace summary (item 5)
-
-`GET /api/workspaces/:workspaceId/summary`
-
-```json
-{ "sourceCount": 8, "readySourceCount": 7, "processingArtifactCount": 1, "unseenArtifactCount": 2 }
-```
-
-- `processingArtifactCount`: artifacts `PENDING` or `PROCESSING`.
-- `unseenArtifactCount`: artifacts that are `READY` and have `viewedAt === null`.
-- It is four `COUNT` queries; fine to poll (e.g. every 5-10 s while something is processing).
-
-### Clearing the "new" dot: `POST /api/workspaces/:id/artifacts/:artifactId/viewed` (204)
-
-- Call it **when the user actually opens the artifact**. It is idempotent.
-- `GET /artifacts/:id` does **not** mark it viewed on purpose, because the UI polls that endpoint
-  for READY and the dot would clear itself.
-- `viewedAt` (ISO string or `null`) is on every artifact object, so the list can render a "New" badge.
-- Artifacts that were already READY before this release were backfilled as seen.
-
-## 4. Pagination (item 8)
-
-Applies to `GET .../sources` and `GET .../artifacts`.
-
-- `?limit=` 1-100 turns paging on (0 or 101 is 400). `?cursor=` is the previous `meta.nextCursor`.
-- **Without `limit` you get everything**, same as before.
-- Always returns `meta: { "total": <rows matching the filters, all pages>, "nextCursor": "<id>" | null }`.
-- Order is stable (newest first, ties broken by id). Stop when `nextCursor` is `null`.
-- Filters combine with paging and `total` respects them: sources `q`, `type`, `status`;
-  artifacts `type`, `status` (new). An invalid enum value is 400.
-- Cursors are row ids. If the row a cursor points at is deleted between pages, that page comes
-  back empty; restart from the first page.
-- `total` is fine for "8 sources" counters and "Showing 25 of 140".
-
-## 5. Bulk endpoints (item 9, verified and changed)
-
-Neither is atomic; one bad id never stops or undoes the others.
-
-`POST .../sources/bulk-delete` `{ "sourceIds": ["..."] }` (at least 1) returns **200**:
+Send the `updatedAt` you last read as `expectedUpdatedAt`. If the item changed since:
 
 ```json
 {
-    "deleted": 2,
-    "results": [
-        { "sourceId": "a", "status": "deleted" },
-        { "sourceId": "zzz", "status": "not_found" }
-    ]
+    "success": false,
+    "error": {
+        "code": "CONFLICT",
+        "message": "This item was changed elsewhere. Reload and try again."
+    }
 }
 ```
 
-`status` is `deleted` | `not_found` | `failed`. Duplicate ids are collapsed. Ids from another
-workspace are `not_found`.
+Reload the item and let the user retry. The check and the write are one atomic statement, so two
+simultaneous edits from the same version cannot both succeed. If you omit `expectedUpdatedAt` the
+backend still guards against a change that happens during the request itself. `updatedAt` is returned
+everywhere sources and artifacts are returned.
 
-`POST .../sources/reprocess`:
+## 4. Editing an artifact
 
-- Body `{}`: re-queues every FAILED source (the "Retry failed" button).
-- Body `{ "sourceIds": [...] }`: re-queues exactly those, any status. Returns
+- Only `READY` artifacts can be edited. Send the **full** `content` object in the shape of the
+  artifact's type, the same shape `GET` returns. Rename-only requests need just `title`.
+- `content` is validated against the artifact's own type. On failure, **400 `VALIDATION_ERROR`** with
+  `details` keyed by dotted path, so you can mark the exact field:
 
 ```json
 {
-    "reprocessed": 1,
-    "results": [
-        { "sourceId": "a", "status": "queued" },
-        { "sourceId": "b", "status": "skipped", "reason": "Already being processed" },
-        { "sourceId": "c", "status": "not_found" }
-    ]
+    "success": false,
+    "error": {
+        "code": "VALIDATION_ERROR",
+        "message": "Invalid artifact content",
+        "details": {
+            "content.questions.0.correctIndex": ["correctIndex must point at one of the options"]
+        }
+    }
 }
 ```
 
-- `status`: `queued` | `skipped` | `not_found` | `failed`. Skipped = still `PENDING`/`PROCESSING`;
-  surface it as "already running", not as an error.
-- Reprocessing runs in the background; the source goes `PENDING` -> `PROCESSING` -> `READY`.
-  Poll the list/get. Rate limit: 30 ingestion requests / 10 min / user (429 beyond that).
-- Reprocessing a READY source clears its old index first, so it briefly has no vectors and chat
-  cannot cite it until it is READY again.
+| Type         | Stored `content`                                                                             | Extra rules                                          |
+| ------------ | -------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `SUMMARY`    | `{ markdown, citations[] }`                                                                  |                                                      |
+| `TAKEAWAYS`  | `{ items: string[3-20] }`                                                                    |                                                      |
+| `FLASHCARDS` | `{ cards: [{ front, back, citations[] }] }` (3-30)                                           |                                                      |
+| `QUIZ`       | `{ questions: [{ question, options[2-5], correctIndex, explanation, citations[] }] }` (3-15) | `correctIndex` < `options.length`                    |
+| `MINDMAP`    | `{ nodes: [{ id, label }] (2-40), edges: [{ id, source, target }] }`                         | unique node ids; every edge ends on an existing node |
+| `REPORT`     | `{ markdown, sections: [{ title, content, citations[] }] }`                                  |                                                      |
+| `WIKI`       | `{ overview, techStack[], architecture, diagram, modules[], gettingStarted }`                |                                                      |
 
-## 6. Normalised source metadata (item 6)
+- A citation is `{ marker: int, sourceId, label }`. Citations are stored exactly as sent, so keep an
+  item's `citations` when the user edits its text. `citations` may be omitted on a brand new item.
+- Unknown keys are rejected (strict), so do not send extra fields.
+- Editing `content` sets `metadata.userEdited = true` and `metadata.editedAt`. A rename alone does not.
 
-Read from `source.metadata` (present on list responses; `content` is not). Keys that do not apply
-are **absent**, never null, so always null-check.
+## 5. Regenerating an artifact
 
-| Key               | Meaning                                                                           | Present for                                                                                           |
-| ----------------- | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `author`          | PDF author, YouTube channel, site name, or repo owner                             | PDF (only if the file's properties name one), YOUTUBE, WEBSITE (only if the page says), GITHUB        |
-| `pageCount`       | pages                                                                             | PDF                                                                                                   |
-| `wordCount`       | words in the text                                                                 | all types. Known immediately for text/markdown/website/YouTube/GitHub; **PDFs only after processing** |
-| `durationSeconds` | video length (seconds)                                                            | YOUTUBE                                                                                               |
-| `fileCount`       | files read                                                                        | GITHUB                                                                                                |
-| `repo`, `owner`   | repo name and its owner. **`repo` is the name only**; build `owner/repo` yourself | GITHUB                                                                                                |
+`POST /artifacts/:artifactId/regenerate` re-runs generation in place: same id and same title, using the
+sources it was built from (or the workspace's READY sources if none were recorded), or its original
+conversation.
 
-Plus the existing keys (`chunkCount`, `indexedAt`, `processingError`, `importedFrom`, ...).
+1. Call with `{}`. If the artifact was edited you get **409 `ARTIFACT_EDITED`**.
+2. Show "Regenerating will discard your edits. Continue?". On confirm, call again with
+   `{ "force": true }`.
+3. The response is **202** with the artifact `PENDING`. Poll `GET /artifacts/:id` until `READY` (or
+   `FAILED` with `metadata.processingError`). The old content stays visible until the new content is
+   ready, and `userEdited` is cleared on success.
+4. 409 `CONFLICT` means it is already generating or changed meanwhile; reload.
 
-Row text suggestions: PDF `"{author} · {pageCount} pages"`, YouTube `"{author} · {mm:ss}"`,
-GitHub `"{fileCount} files"`, others `"{wordCount} words"`; fall back to host / "Added X ago".
+It is rate limited like creation (20 per minute per user).
 
-Caveats:
+## 6. Excluding chunks
 
-- `durationSeconds` is derived from the last caption's end time, so it can be a little short for
-  videos with a silent outro, and is absent if the video has no timed captions.
-- YouTube `author` and the default title come from YouTube's public oEmbed endpoint, best effort
-  with a 4 s timeout. If it fails the title is `YouTube: <videoId>` and `author` is missing.
-- Sources created **before** this release: `wordCount` and PDF `author` appear only after a
-  reprocess. They have no `durationSeconds`/`fileCount`/`author` (YouTube/GitHub) until
-  re-imported. GitHub sources get `fileCount` only on re-import or sync.
-- WEBSITE `author` is best effort (page `author`, then site name). Often missing.
+`PATCH /sources/:id/chunks/:chunkId` with `{ "excluded": true | false }` returns the chunk. Excluded
+chunks stay indexed but are skipped by chat retrieval and left out of artifact generation. Nothing is
+re-embedded, so the toggle is instant.
 
-## 7. Richer chat citations (item 2)
+- Show an "excluded" toggle per chunk in the chunk viewer, driven by `chunk.excluded`.
+- The flags reset to `false` if the source is re-indexed (content edit or reprocess), because
+  re-indexing creates new chunks.
+- Excluding every chunk of a source leaves it with no usable text: artifact generation from only that
+  source fails with "Selected sources have no extracted content yet".
 
-`GET .../conversations/:id/messages` -> `message.citations[]` for source citations now includes:
+## 7. Smaller items
 
-| Field                                                                            | Meaning                                                                            |
-| -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `chunkIndex`                                                                     | 0-based position of the chunk. Show `chunkIndex + 1`.                              |
-| `chunkTotal`                                                                     | chunks in the source -> "Chunk 12 of 48"                                           |
-| `page`                                                                           | PDFs                                                                               |
-| `chapter`                                                                        | PDFs **that have a bookmark outline**: the top-level bookmark the page falls under |
-| `section`                                                                        | WEBSITE and MARKDOWN sources: nearest markdown heading above the chunk             |
-| `path`                                                                           | GITHUB sources (existing)                                                          |
-| `excerpt`, `score`, `marker`, `sourceId`, `sourceTitle`, `sourceType`, `chunkId` | existing                                                                           |
+- **Rename conversation:** `PATCH /conversations/:id` `{ "title": "..." }`; the title is trimmed and
+  must be 1-120 characters. Returns the updated conversation.
+- **Artifact search:** `GET /artifacts?q=photosynthesis` matches titles case-insensitively and combines
+  with `type`, `status`, `limit` and `cursor`.
+- **Artifact bulk delete:** register the selection UI against `POST /artifacts/bulk-delete`; the route
+  is `/artifacts/bulk-delete`, not `/artifacts/:id`.
+- **Titles:** generated artifacts are renamed once, at `READY`, from the default
+  `Quiz · 11/8/2026` to a short topic title. The artifact list may therefore show the date title
+  briefly while an artifact is `PENDING`/`PROCESSING`.
 
-Web citations (`sourceType: "WEB"`) are unchanged and have none of the new fields.
+## 8. Suggested UI wiring
 
-**Limitations**
+- Source editor: show title editing always; show the content editor only for TEXT/MARKDOWN. On save,
+  send `expectedUpdatedAt`; on 409 `CONFLICT` reload and re-apply. After a content save, show the
+  source as re-indexing and poll until `READY`.
+- Artifact viewer: "Edit" when `READY`; send the full `content`; surface `details` per field on 400.
+  Show an "edited" badge from `metadata.userEdited`.
+- Regenerate button: handle `ARTIFACT_EDITED` with a confirmation, then retry with `force: true`.
+- Chunk viewer: per-chunk exclude toggle bound to `excluded`.
+- Library: bulk delete with the selected ids, then refresh and read `results`.
 
-- **There is no `pageEnd`.** A citation is exactly one chunk and a chunk never spans pages, so a
-  range ("pp. 28-31") cannot be produced. Render `p. {page}` only. If you really need ranges,
-  that is a chunking redesign, not a small field.
-- `chapter` is absent for PDFs without bookmarks (many scanned or exported PDFs). `section` is
-  absent for plain TEXT sources and for content before the first heading. Every new field is
-  optional: render each only when present.
-- `chunkTotal`, `chapter`, `section` exist only on chunks indexed **after** this release. Old
-  sources need a reprocess; until then those citations lack them (`chunkIndex` still works).
-- Chapter detection uses only the PDF's top-level bookmarks. Sub-chapters are ignored.
+## 9. Operational notes
 
-## 8. Per-item citations in generated artifacts (item 3)
+- **Migration required:** `20261108090000_add_chunk_excluded` (adds
+  `source_chunk.excluded BOOLEAN NOT NULL DEFAULT false`). Run `npm run db:migrate:deploy`. It is already
+  applied to the local dev DB. Existing Pinecone vectors need no backfill.
+- **Verified against a running server:** smoke test `npm run smoke` (92 checks with AI, 49 with
+  `--no-ai`) and the Postman collection run with newman (133 requests, 328 assertions, 0 failures).
+- The smoke test uses about 250 of the API's 300 requests per 15 minutes per IP; wait before re-running
+  it back to back.
+- Postman: new requests are in folders 03 (sources, chunks), 04 (PDF content edit), 06 (rename) and
+  08 (artifact edit, regenerate, search), plus bulk artifact delete in 10.
 
-For `SUMMARY`, `FLASHCARDS`, `QUIZ`, `REPORT`. Citation shape:
+## 10. Decisions to be aware of
 
-```json
-{ "marker": 1, "sourceId": "cm...", "label": "Make It Stick" }
-```
-
-`label` is the source title; `marker` is its number in the generation context.
-
-| Type         | Where                                                                                                                                      |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `FLASHCARDS` | `content.cards[i].citations`                                                                                                               |
-| `QUIZ`       | `content.questions[i].citations`                                                                                                           |
-| `REPORT`     | `content.sections[i].citations` (the full `markdown` field has no markers)                                                                 |
-| `SUMMARY`    | `content.markdown` contains inline `[1]`, `[2]` markers; `content.citations` lists the sources they point at, in order of first appearance |
-
-For SUMMARY, map `[n]` in the markdown to the citation with `marker === n`. Render
-`[1]` as a link/footnote and the "Source notes" list from `content.citations`.
-
-**Limitations**
-
-- **No page numbers** on artifact citations (`page?` in your spec is never set). The generation
-  text has no page boundaries. Show `label` only.
-- The model chooses the citations. Treat them as "based on", not proof. An item can have an
-  empty `citations: []`; the UI must handle that (hide the "Source" chip).
-- Numbers that match no source are dropped server-side, so every citation resolves to a real
-  `sourceId` that was in the workspace at generation time. The source may have been deleted since.
-- Large sources are condensed before generation, so a citation says which source, not where in it.
-- MINDMAP, TAKEAWAYS and WIKI are unchanged (no citations).
-- Artifacts generated before this release have no `citations` keys at all. Use
-  `item.citations ?? []`.
-
-## 9. Generate an artifact from a conversation (item 4)
-
-`POST .../artifacts`
-
-```json
-{ "type": "FLASHCARDS", "conversationId": "cm...", "messageIds": ["cm..."], "title": "optional" }
-```
-
-- `conversationId` replaces "all ready sources". `messageIds` (optional, 1-200) limits to some of
-  that conversation's messages; ids not in the conversation are 400.
-- Validation (all `400` `VALIDATION_ERROR` unless noted): `messageIds` without `conversationId`;
-  `conversationId` together with `sourceIds`; `type: "WIKI"` with a conversation. Unknown or
-  foreign conversation is **404**. A conversation with no messages is **400**.
-- Returns **201** with a `PENDING` artifact, then poll `GET .../artifacts/:id` until `READY` or
-  `FAILED` exactly as before. Rate limit: 20 AI requests / min / user.
-- `artifact.sourceIds` = the sources the chosen replies cited (may be empty).
-  `artifact.metadata.conversationId` (and `messageIds` if a subset) records the origin.
-- Items have `citations: []` because a transcript has no numbered sources. Do not show a source
-  chip for conversation-based artifacts unless you build one from `artifact.sourceIds`.
-- The chat's own `[1]` / `[W1]` markers are stripped from the transcript before generation. Long
-  conversations are cut to the most recent messages that fit the context budget.
-- Conversation is read when the background job runs, not at request time; messages added in
-  between are included (unless `messageIds` was given).
-
-## 10. Endpoint cheat sheet
-
-| Method | Path                                                     | Notes                              |
-| ------ | -------------------------------------------------------- | ---------------------------------- |
-| GET    | `/api/workspaces?q&sort&order`                           | counts included                    |
-| GET    | `/api/workspaces/:id`                                    | counts included                    |
-| GET    | `/api/workspaces/:id/summary`                            | sidebar counts                     |
-| GET    | `/api/workspaces/:id/sources?q&type&status&limit&cursor` | `meta` always                      |
-| POST   | `/api/workspaces/:id/sources/bulk-delete`                | **200** + results                  |
-| POST   | `/api/workspaces/:id/sources/reprocess`                  | `{}` or `{ sourceIds }`            |
-| GET    | `/api/workspaces/:id/artifacts?type&status&limit&cursor` | `meta` always; `viewedAt` on items |
-| POST   | `/api/workspaces/:id/artifacts`                          | `conversationId`, `messageIds` new |
-| POST   | `/api/workspaces/:id/artifacts/:artifactId/viewed`       | 204, idempotent                    |
-
-## 10b. Editing, regeneration and chunk control (new)
-
-Every endpoint is under `/api/workspaces/:workspaceId`. Errors use the usual envelope
-`{ success: false, error: { code, message, details? } }`. `updatedAt` is returned on every source and artifact.
-
-| Endpoint                                         | Body                                                                                            | Success                                                                                        | Errors                                                                                      |
-| ------------------------------------------------ | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `PATCH /sources/:sourceId`                       | `{ title?: 1-200, content?: non-empty, expectedUpdatedAt?: ISO }` (≥1 of title/content, strict) | **200** source (same shape as `GET /sources/:id`, with `content`)                              | 400 validation; 400 content on a non-text source; 404; 409 still processing; 409 `CONFLICT` |
-| `PATCH /sources/:sourceId/chunks/:chunkId`       | `{ excluded: boolean }` (strict)                                                                | **200** chunk (`excluded` included)                                                            | 400; 404 source/chunk; 409 source processing                                                |
-| `PATCH /artifacts/:artifactId`                   | `{ title?: 1-200, content?: object, expectedUpdatedAt?: ISO }` (≥1, strict)                     | **200** artifact                                                                               | 400 validation with field `details`; 404; 409 not `READY`; 409 `CONFLICT`                   |
-| `POST /artifacts/:artifactId/regenerate`         | `{ force?: boolean }`                                                                           | **202** artifact (`PENDING`)                                                                   | 400 no ready sources; 404; 409 `ARTIFACT_EDITED`; 409 already generating                    |
-| `GET /artifacts?q=&type=&status=&limit=&cursor=` | –                                                                                               | **200** `{ data, meta: { total, nextCursor } }`                                                | 400 validation                                                                              |
-| `POST /artifacts/bulk-delete`                    | `{ artifactIds: string[1-100] }`                                                                | **200** `{ deleted, results: [{ artifactId, status: "deleted" \| "not_found" \| "failed" }] }` | 400; 404 workspace                                                                          |
-| `PATCH /conversations/:conversationId`           | `{ title: 1-120 }` (strict)                                                                     | **200** conversation                                                                           | 400; 404                                                                                    |
-
-How the UI should use them:
-
-- **Source content edit replaces, never appends.** Old chunks and vectors are deleted and the text is
-  re-indexed from scratch, so old and new versions cannot both be retrieved. The source returns as
-  `PENDING`; poll `GET /sources/:id` until `READY` (chat uses the old text until the old vectors are
-  removed, which happens immediately after the save, then has no text from this source until `READY`).
-- **Title edit** is instant (no re-index) and fixes chat citation titles. Older messages keep the title
-  they were saved with.
-- **Concurrency:** send the `updatedAt` you last read as `expectedUpdatedAt`. On **409 `CONFLICT`**
-  (`"This item was changed elsewhere. Reload and try again."`) reload the item and let the user retry.
-- **Artifact edit:** send a full `content` object in the shape of the artifact's type (the same shape
-  `GET` returns). Citations are stored as you send them; omit `citations` on a brand new item.
-  Content edits set `metadata.userEdited` (and `editedAt`); a rename alone does not.
-- **Regenerate:** if you get **409 `ARTIFACT_EDITED`**, show "Regenerating will discard your edits",
-  then call again with `{ "force": true }`. The artifact keeps its id and title and shows `PENDING` →
-  `READY`; its old content remains until the new one is ready.
-- **Titles:** generated artifacts now get a short topic title instead of `Quiz · 11/8/2026`, once they
-  reach `READY`. Titles you set are never overwritten.
-- **Excluded chunks:** show an `excluded` toggle per chunk in the chunk viewer. Excluded chunks are
-  skipped by chat and by artifact generation. Flags reset if the source is re-indexed.
-
-## 11. Suggested UI wiring
-
-- Dashboard: one `GET /api/workspaces` (with `q`/`sort` bound to the search box and sort menu,
-  debounce `q`). No per-notebook requests needed.
-- Sidebar: `GET .../summary` on notebook open, then poll while `processingArtifactCount > 0` or any
-  source is not READY. Show the Learn dot when `unseenArtifactCount > 0`.
-- Opening an artifact: render, then fire `POST .../viewed` and refresh the summary.
-- Library: request `?limit=25`, "Load more" while `meta.nextCursor`. Keep selection by id across
-  pages. After a bulk action refresh the current pages and read `results` for per-row errors.
-- Make It Stick card: `POST .../artifacts` with the current `conversationId` (and the visible
-  `messageIds` if you want a subset), then route to Learn.
-
-## 12. Operational notes
-
-- **Migrations required:** `20261107090000_add_artifact_viewed_at` (adds `learning_artifact.viewedAt`) and
-  `20261108090000_add_chunk_excluded` (adds `source_chunk.excluded BOOLEAN NOT NULL DEFAULT false`).
-  Run `npm run db:migrate:deploy`. Both are applied to the local dev DB. Existing Pinecone vectors need
-  no backfill: the retrieval filter `excluded != true` also matches vectors without the field.
-- Smoke test: `npm run smoke` (needs `npm run dev` running). It covers every behaviour above.
-  It leaves two throwaway `smoke-*@test.local` users in the DB by design.
-- Postman collection has the new requests; the bulk-delete test now expects 200.
-- Not covered by automated tests: a live website scrape and a live GitHub import with the new
-  metadata (the code paths are small and type-checked; `--external` smoke exercises them).
-
-## 13. Not done / decisions that need you
-
-- `pageEnd` / page ranges: not possible with current chunking (section 7).
-- Page numbers inside artifact citations: not available (section 8).
-- "Last updated" follows workspace edits, not activity (section 1).
-- Backfilling metadata/citation fields for existing sources is done by reprocessing, not
-  automatically. If the demo data matters, reprocess those sources once
-  (`POST .../sources/reprocess` with their ids).
-- `login-hero.jpg` is not backend (as in your doc).
+- A rename does not mark an artifact as edited, so it never triggers the discard prompt. Say if you
+  want it to.
+- Past chat messages keep the source title they were saved with; only new answers show a new title.
+- Existing artifacts keep their old content after a source edit until they are regenerated.
+- The two new diagrams (source edit, artifact edit/regenerate) are Mermaid-only in
+  `ARCHITECTURE.md` until their PNGs are exported from Eraser.
