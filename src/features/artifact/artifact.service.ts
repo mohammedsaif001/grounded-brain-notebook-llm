@@ -25,7 +25,7 @@ export class ArtifactService {
      *
      * @param workspaceId - Workspace to list from
      * @param userId - Requesting user; must own the workspace
-     * @param query - Optional `type` and `status` filters plus `limit` and `cursor`
+     * @param query - Optional `q` (title), `type` and `status` filters plus `limit` and `cursor`
      * @returns The page of artifacts, the total matching, and the next cursor
      */
     static async list(workspaceId: string, userId: string, query: ListArtifactsQuery = {}) {

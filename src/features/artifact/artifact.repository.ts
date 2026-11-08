@@ -62,11 +62,12 @@ export class ArtifactRepository {
      * Without `limit` the whole list comes back as a single page.
      *
      * @param workspaceId - Owning workspace
-     * @param query - Optional `type` and `status` filters plus `limit` and `cursor`
+     * @param query - Optional `q` (title), `type` and `status` filters plus `limit` and `cursor`
      */
     static async findPage(workspaceId: string, query: ListArtifactsQuery = {}) {
         const where = {
             workspaceId,
+            ...(query.q ? { title: { contains: query.q, mode: "insensitive" as const } } : {}),
             ...(query.type ? { type: query.type } : {}),
             ...(query.status ? { status: query.status } : {}),
         };

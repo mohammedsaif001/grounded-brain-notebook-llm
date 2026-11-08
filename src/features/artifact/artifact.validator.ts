@@ -21,8 +21,9 @@ export const artifactIdParamSchema = workspaceIdParamSchema.extend({
 /** Generation states an artifact moves through: PENDING → PROCESSING → READY or FAILED. */
 const artifactStatuses = ["PENDING", "PROCESSING", "READY", "FAILED"] as const;
 
-/** Query string for listing artifacts: optional `type` and `status` filters plus `limit` and `cursor`. */
+/** Query string for listing artifacts: `q` (title), `type` and `status` filters plus `limit` and `cursor`. */
 export const listArtifactsQuerySchema = z.object({
+    q: z.string().trim().optional(),
     type: z.enum(artifactTypes).optional(),
     status: z.enum(artifactStatuses).optional(),
     ...paginationQuerySchema.shape,

@@ -10,7 +10,7 @@ import { workspaceIdParamSchema } from "../workspace/workspace.validator.js";
 
 /** HTTP handlers for `/api/workspaces/:workspaceId/artifacts`. Each validates input, then delegates to the service. */
 export class ArtifactController {
-    /** GET `/` — lists the workspace's artifacts; `type`, `status` filters and `limit`/`cursor` paging (200). */
+    /** GET `/` — lists the workspace's artifacts; `q`, `type`, `status` filters and `limit`/`cursor` paging (200). */
     static list = async (req: Request, res: Response) => {
         const { workspaceId } = workspaceIdParamSchema.parse(req.params);
         const query = listArtifactsQuerySchema.parse(req.query);
