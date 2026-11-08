@@ -90,12 +90,32 @@ export const importWebSearchSchema = z.object({
     url: z.string().trim().url(),
 });
 
+/**
+ * Body for editing a source: a new `title` (any source type) and/or new `content` (text and
+ * markdown sources only, checked in the service). `expectedUpdatedAt` is the `updatedAt` the
+ * client last saw; a mismatch is rejected with 409 `CONFLICT`.
+ */
+export const updateSourceSchema = z
+    .object({
+        title: z.string().trim().min(1, "Title is required").max(200).optional(),
+        content: z.string().trim().min(1, "Content is required").optional(),
+        expectedUpdatedAt: z.iso.datetime().optional(),
+    })
+    .strict()
+    .refine((input) => input.title !== undefined || input.content !== undefined, {
+        path: ["title"],
+        message: "Provide a title or content to update",
+    });
+
 /** Body for excluding a chunk from (or returning it to) retrieval and artifact generation. */
 export const updateChunkSchema = z
     .object({
         excluded: z.boolean(),
     })
     .strict();
+
+/** Validated input for editing a source. */
+export type UpdateSourceInput = z.infer<typeof updateSourceSchema>;
 
 /** Validated input for creating a text/markdown source. */
 export type CreateSourceInput = z.infer<typeof createSourceSchema>;

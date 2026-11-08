@@ -51,8 +51,9 @@ export type CreateSourceData = {
     metadata?: Prisma.InputJsonValue;
 };
 
-/** Fields that change during processing. */
+/** Fields that change during processing or when the user edits a source. */
 export type UpdateSourceData = {
+    title?: string;
     content?: string | null;
     status?: SourceRecord["status"];
     metadata?: Prisma.InputJsonValue;
@@ -230,6 +231,36 @@ export class SourceRepository {
             data,
             select: sourceSelect,
         });
+    }
+
+    /**
+     * Updates a source only if it is still exactly as the caller last read it, in one atomic
+     * statement (compare-and-set): `updatedAt` must match and the source must not be queued or
+     * running. Nothing is written otherwise.
+     *
+     * @param sourceId - Source to update
+     * @param workspaceId - Workspace it must belong to
+     * @param expectedUpdatedAt - The `updatedAt` the caller read
+     * @param data - Fields to change
+     * @returns The updated source, or `null` when it changed, is processing, or no longer exists
+     */
+    static async updateIfCurrent(
+        sourceId: string,
+        workspaceId: string,
+        expectedUpdatedAt: Date,
+        data: UpdateSourceData,
+    ) {
+        const { count } = await prisma.source.updateMany({
+            where: {
+                id: sourceId,
+                workspaceId,
+                updatedAt: expectedUpdatedAt,
+                status: { notIn: ["PENDING", "PROCESSING"] },
+            },
+            data,
+        });
+
+        return count === 1 ? this.findByIdAndWorkspaceId(sourceId, workspaceId) : null;
     }
 
     /**

@@ -43,6 +43,19 @@ export class SourceChunkRepository {
     }
 
     /**
+     * Returns the ids of a source's chunks (also their vector ids), without their text.
+     *
+     * @param sourceId - Source whose chunks to list
+     */
+    static async findIdsBySourceId(sourceId: string) {
+        const rows = await prisma.sourceChunk.findMany({
+            where: { sourceId },
+            select: { id: true },
+        });
+        return rows.map((row) => row.id);
+    }
+
+    /**
      * Finds one chunk, only if it belongs to the given source.
      *
      * @param chunkId - Chunk id

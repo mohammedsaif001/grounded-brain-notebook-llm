@@ -5,6 +5,9 @@ import { PineconeClient, type VectorMetadata } from "../../config/pinecone.js";
 /** Pinecone upsert batch size. */
 const UPSERT_BATCH_SIZE = 100;
 
+/** Metadata updates sent in parallel (Pinecone updates one vector per request). */
+const UPDATE_CONCURRENCY = 10;
+
 /**
  * Runs a delete, treating "namespace not found" as success.
  *
@@ -95,6 +98,24 @@ export class VectorRepository {
     ) {
         const index = await PineconeClient.getIndex();
         await ignoreMissingNamespace(() => index.namespace(workspaceId).update({ id, metadata }));
+    }
+
+    /**
+     * Sets `sourceTitle` on the given vectors so citations show a renamed source's new title.
+     * Nothing is re-embedded.
+     *
+     * @param workspaceId - Namespace containing the vectors
+     * @param ids - Vector ids (chunk ids) to update
+     * @param sourceTitle - The source's new title
+     */
+    static async updateSourceTitle(workspaceId: string, ids: string[], sourceTitle: string) {
+        for (let i = 0; i < ids.length; i += UPDATE_CONCURRENCY) {
+            await Promise.all(
+                ids
+                    .slice(i, i + UPDATE_CONCURRENCY)
+                    .map((id) => this.updateMetadata(workspaceId, id, { sourceTitle })),
+            );
+        }
     }
 
     /**
