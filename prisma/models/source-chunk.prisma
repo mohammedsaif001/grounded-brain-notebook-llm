@@ -6,6 +6,8 @@ model SourceChunk {
   content    String
   tokenCount Int?
   metadata   Json?
+  // Left out of chat retrieval and artifact generation when true; the embedding is kept.
+  excluded   Boolean  @default(false)
   createdAt  DateTime @default(now())
   source     Source   @relation(fields: [sourceId], references: [id], onDelete: Cascade)
 
