@@ -262,6 +262,42 @@ For SUMMARY, map `[n]` in the markdown to the citation with `marker === n`. Rend
 | POST   | `/api/workspaces/:id/artifacts`                          | `conversationId`, `messageIds` new |
 | POST   | `/api/workspaces/:id/artifacts/:artifactId/viewed`       | 204, idempotent                    |
 
+## 10b. Editing, regeneration and chunk control (new)
+
+Every endpoint is under `/api/workspaces/:workspaceId`. Errors use the usual envelope
+`{ success: false, error: { code, message, details? } }`. `updatedAt` is returned on every source and artifact.
+
+| Endpoint                                         | Body                                                                                            | Success                                                                                        | Errors                                                                                      |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `PATCH /sources/:sourceId`                       | `{ title?: 1-200, content?: non-empty, expectedUpdatedAt?: ISO }` (≥1 of title/content, strict) | **200** source (same shape as `GET /sources/:id`, with `content`)                              | 400 validation; 400 content on a non-text source; 404; 409 still processing; 409 `CONFLICT` |
+| `PATCH /sources/:sourceId/chunks/:chunkId`       | `{ excluded: boolean }` (strict)                                                                | **200** chunk (`excluded` included)                                                            | 400; 404 source/chunk; 409 source processing                                                |
+| `PATCH /artifacts/:artifactId`                   | `{ title?: 1-200, content?: object, expectedUpdatedAt?: ISO }` (≥1, strict)                     | **200** artifact                                                                               | 400 validation with field `details`; 404; 409 not `READY`; 409 `CONFLICT`                   |
+| `POST /artifacts/:artifactId/regenerate`         | `{ force?: boolean }`                                                                           | **202** artifact (`PENDING`)                                                                   | 400 no ready sources; 404; 409 `ARTIFACT_EDITED`; 409 already generating                    |
+| `GET /artifacts?q=&type=&status=&limit=&cursor=` | –                                                                                               | **200** `{ data, meta: { total, nextCursor } }`                                                | 400 validation                                                                              |
+| `POST /artifacts/bulk-delete`                    | `{ artifactIds: string[1-100] }`                                                                | **200** `{ deleted, results: [{ artifactId, status: "deleted" \| "not_found" \| "failed" }] }` | 400; 404 workspace                                                                          |
+| `PATCH /conversations/:conversationId`           | `{ title: 1-120 }` (strict)                                                                     | **200** conversation                                                                           | 400; 404                                                                                    |
+
+How the UI should use them:
+
+- **Source content edit replaces, never appends.** Old chunks and vectors are deleted and the text is
+  re-indexed from scratch, so old and new versions cannot both be retrieved. The source returns as
+  `PENDING`; poll `GET /sources/:id` until `READY` (chat uses the old text until the old vectors are
+  removed, which happens immediately after the save, then has no text from this source until `READY`).
+- **Title edit** is instant (no re-index) and fixes chat citation titles. Older messages keep the title
+  they were saved with.
+- **Concurrency:** send the `updatedAt` you last read as `expectedUpdatedAt`. On **409 `CONFLICT`**
+  (`"This item was changed elsewhere. Reload and try again."`) reload the item and let the user retry.
+- **Artifact edit:** send a full `content` object in the shape of the artifact's type (the same shape
+  `GET` returns). Citations are stored as you send them; omit `citations` on a brand new item.
+  Content edits set `metadata.userEdited` (and `editedAt`); a rename alone does not.
+- **Regenerate:** if you get **409 `ARTIFACT_EDITED`**, show "Regenerating will discard your edits",
+  then call again with `{ "force": true }`. The artifact keeps its id and title and shows `PENDING` →
+  `READY`; its old content remains until the new one is ready.
+- **Titles:** generated artifacts now get a short topic title instead of `Quiz · 11/8/2026`, once they
+  reach `READY`. Titles you set are never overwritten.
+- **Excluded chunks:** show an `excluded` toggle per chunk in the chunk viewer. Excluded chunks are
+  skipped by chat and by artifact generation. Flags reset if the source is re-indexed.
+
 ## 11. Suggested UI wiring
 
 - Dashboard: one `GET /api/workspaces` (with `q`/`sort` bound to the search box and sort menu,
@@ -276,8 +312,10 @@ For SUMMARY, map `[n]` in the markdown to the citation with `marker === n`. Rend
 
 ## 12. Operational notes
 
-- **Migration required:** `20261107090000_add_artifact_viewed_at` (adds `learning_artifact.viewedAt`).
-  Run `npm run db:migrate:deploy`. Already applied to the local dev DB.
+- **Migrations required:** `20261107090000_add_artifact_viewed_at` (adds `learning_artifact.viewedAt`) and
+  `20261108090000_add_chunk_excluded` (adds `source_chunk.excluded BOOLEAN NOT NULL DEFAULT false`).
+  Run `npm run db:migrate:deploy`. Both are applied to the local dev DB. Existing Pinecone vectors need
+  no backfill: the retrieval filter `excluded != true` also matches vectors without the field.
 - Smoke test: `npm run smoke` (needs `npm run dev` running). It covers every behaviour above.
   It leaves two throwaway `smoke-*@test.local` users in the DB by design.
 - Postman collection has the new requests; the bulk-delete test now expects 200.
