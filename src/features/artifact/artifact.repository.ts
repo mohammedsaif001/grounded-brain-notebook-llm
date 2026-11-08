@@ -174,6 +174,31 @@ export class ArtifactRepository {
     }
 
     /**
+     * Updates an artifact only if it is still exactly as the caller last read it, in one atomic
+     * statement (compare-and-set): `updatedAt` must match and the artifact must be `READY`.
+     * Nothing is written otherwise.
+     *
+     * @param artifactId - Artifact to update
+     * @param workspaceId - Workspace it must belong to
+     * @param expectedUpdatedAt - The `updatedAt` the caller read
+     * @param data - Fields to change
+     * @returns The updated artifact, or `null` when it changed, left `READY`, or no longer exists
+     */
+    static async updateIfCurrent(
+        artifactId: string,
+        workspaceId: string,
+        expectedUpdatedAt: Date,
+        data: UpdateArtifactData,
+    ) {
+        const { count } = await prisma.learningArtifact.updateMany({
+            where: { id: artifactId, workspaceId, updatedAt: expectedUpdatedAt, status: "READY" },
+            data,
+        });
+
+        return count === 1 ? this.findByIdAndWorkspaceId(artifactId, workspaceId) : null;
+    }
+
+    /**
      * Deletes an artifact.
      *
      * @param artifactId - Artifact to delete

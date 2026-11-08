@@ -1,7 +1,17 @@
 import { EventPublisher } from "../../jobs/events.js";
-import { ArtifactRepository, type ArtifactRecord } from "./artifact.repository.js";
+import type { z } from "zod";
+import {
+    ArtifactRepository,
+    type ArtifactRecord,
+    type UpdateArtifactData,
+} from "./artifact.repository.js";
 import { APIError } from "../../shared/http/api-error.js";
-import type { CreateArtifactInput, ListArtifactsQuery } from "./artifact.validator.js";
+import type {
+    CreateArtifactInput,
+    ListArtifactsQuery,
+    UpdateArtifactInput,
+} from "./artifact.validator.js";
+import { artifactContentSchemas } from "./artifact-content.schema.js";
 import { ArtifactGenerationService } from "./artifact-generation.service.js";
 import { ConversationService } from "../conversation/conversation.service.js";
 import { WorkspaceService } from "../workspace/workspace.service.js";
@@ -18,6 +28,32 @@ const DEFAULT_ARTIFACT_TITLES: Record<ArtifactRecord["type"], string> = {
     REPORT: "AI Report",
     WIKI: "Repo Wiki",
 };
+
+/**
+ * Reads a JSON column as a plain object, tolerating null or malformed values.
+ *
+ * @param value - Raw JSON column value
+ */
+function readObject(value: unknown): Record<string, unknown> {
+    return value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {};
+}
+
+/**
+ * Turns content validation issues into field-level details, keyed by the dotted path under
+ * `content` (e.g. `content.cards.0.front`).
+ *
+ * @param error - Failed parse of the content against its type's schema
+ */
+function contentErrors(error: z.ZodError) {
+    const details: Record<string, string[]> = {};
+    for (const issue of error.issues) {
+        const key = ["content", ...issue.path.map(String)].join(".");
+        (details[key] ??= []).push(issue.message);
+    }
+    return details;
+}
 
 /** Learning artifact business logic: CRUD plus the background generation entry point. */
 export class ArtifactService {
@@ -189,6 +225,72 @@ export class ArtifactService {
     static async delete(workspaceId: string, artifactId: string, userId: string) {
         await this.get(workspaceId, artifactId, userId);
         await ArtifactRepository.delete(artifactId);
+    }
+
+    /**
+     * Edits a finished artifact's title and/or content.
+     *
+     * Content must match the schema of the artifact's own type (the same shapes generation
+     * produces; citations are kept as sent). Editing content marks the artifact
+     * `metadata.userEdited` so a later regenerate asks before discarding the changes; renaming
+     * alone does not, since a regenerate keeps the title anyway. The write is a single
+     * compare-and-set on `updatedAt` and status.
+     *
+     * @param workspaceId - Workspace the artifact belongs to
+     * @param artifactId - Artifact to edit
+     * @param userId - Requesting user; must own the workspace
+     * @param input - New title and/or content, and the `updatedAt` the client last saw
+     * @returns The updated artifact
+     * @throws {APIError} NotFound, Conflict unless the artifact is `READY`, Validation (with
+     *   per-field details) for invalid content, `CONFLICT` when it changed elsewhere
+     */
+    static async update(
+        workspaceId: string,
+        artifactId: string,
+        userId: string,
+        input: UpdateArtifactInput,
+    ) {
+        const artifact = await this.get(workspaceId, artifactId, userId);
+
+        if (artifact.status !== "READY") {
+            throw APIError.Conflict("Only finished artifacts can be edited");
+        }
+        if (
+            input.expectedUpdatedAt &&
+            new Date(input.expectedUpdatedAt).getTime() !== artifact.updatedAt.getTime()
+        ) {
+            throw APIError.StaleWrite();
+        }
+
+        const data: UpdateArtifactData = {};
+        if (input.title !== undefined) {
+            data.title = input.title;
+        }
+        if (input.content !== undefined) {
+            const parsed = artifactContentSchemas[artifact.type].safeParse(input.content);
+            if (!parsed.success) {
+                throw APIError.Validation("Invalid artifact content", contentErrors(parsed.error));
+            }
+
+            data.content = parsed.data;
+            data.metadata = {
+                ...readObject(artifact.metadata),
+                userEdited: true,
+                editedAt: new Date().toISOString(),
+            };
+        }
+
+        const updated = await ArtifactRepository.updateIfCurrent(
+            artifactId,
+            workspaceId,
+            artifact.updatedAt,
+            data,
+        );
+        if (!updated) {
+            throw APIError.StaleWrite();
+        }
+
+        return updated;
     }
 
     /**

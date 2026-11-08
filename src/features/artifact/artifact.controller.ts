@@ -6,6 +6,7 @@ import {
     bulkDeleteArtifactsSchema,
     createArtifactSchema,
     listArtifactsQuerySchema,
+    updateArtifactSchema,
 } from "./artifact.validator.js";
 import { workspaceIdParamSchema } from "../workspace/workspace.validator.js";
 
@@ -51,6 +52,19 @@ export class ArtifactController {
             input.artifactIds,
         );
         APIResponse.Ok(res, result);
+    };
+
+    /** PATCH `/:artifactId` — edits the title and/or content of a finished artifact (200). */
+    static update = async (req: Request, res: Response) => {
+        const { workspaceId, artifactId } = artifactIdParamSchema.parse(req.params);
+        const input = updateArtifactSchema.parse(req.body);
+        const artifact = await ArtifactService.update(
+            workspaceId,
+            artifactId,
+            req.session.user.id,
+            input,
+        );
+        APIResponse.Ok(res, artifact);
     };
 
     /** DELETE `/:artifactId` — deletes an artifact (204). */

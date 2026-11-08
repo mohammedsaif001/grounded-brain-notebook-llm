@@ -73,8 +73,29 @@ export const bulkDeleteArtifactsSchema = z
     })
     .strict();
 
+/**
+ * Body for editing an artifact: a new `title` and/or new `content`. The content is checked
+ * against the artifact's own type in the service (the type itself is not editable).
+ * `expectedUpdatedAt` is the `updatedAt` the client last saw; a mismatch is rejected with 409
+ * `CONFLICT`.
+ */
+export const updateArtifactSchema = z
+    .object({
+        title: z.string().trim().min(1, "Title is required").max(200).optional(),
+        content: z.record(z.string(), z.unknown()).optional(),
+        expectedUpdatedAt: z.iso.datetime().optional(),
+    })
+    .strict()
+    .refine((input) => input.title !== undefined || input.content !== undefined, {
+        path: ["title"],
+        message: "Provide a title or content to update",
+    });
+
 /** Validated query for listing artifacts. */
 export type ListArtifactsQuery = z.infer<typeof listArtifactsQuerySchema>;
+
+/** Validated body for editing an artifact. */
+export type UpdateArtifactInput = z.infer<typeof updateArtifactSchema>;
 
 /** Validated body for bulk-deleting artifacts. */
 export type BulkDeleteArtifactsInput = z.infer<typeof bulkDeleteArtifactsSchema>;
