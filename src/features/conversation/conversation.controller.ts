@@ -1,7 +1,11 @@
 import type { Request, Response } from "express";
 import { ConversationService } from "./conversation.service.js";
 import { APIResponse } from "../../shared/http/api-response.js";
-import { conversationIdParamSchema, createConversationSchema } from "./conversation.validator.js";
+import {
+    conversationIdParamSchema,
+    createConversationSchema,
+    updateConversationSchema,
+} from "./conversation.validator.js";
 import { workspaceIdParamSchema } from "../workspace/workspace.validator.js";
 
 /** HTTP handlers for `/api/workspaces/:workspaceId/conversations`. */
@@ -34,6 +38,19 @@ export class ConversationController {
             req.session.user.id,
         );
         APIResponse.Ok(res, messages);
+    };
+
+    /** PATCH `/:conversationId` — renames the conversation and returns it (200). */
+    static update = async (req: Request, res: Response) => {
+        const { workspaceId, conversationId } = conversationIdParamSchema.parse(req.params);
+        const { title } = updateConversationSchema.parse(req.body);
+        const conversation = await ConversationService.rename(
+            workspaceId,
+            conversationId,
+            req.session.user.id,
+            title,
+        );
+        APIResponse.Ok(res, conversation);
     };
 
     /** DELETE `/:conversationId` — deletes the conversation and its messages (204). */

@@ -11,4 +11,5 @@ conversationRouter.get(
     "/:conversationId/messages",
     asyncHandler(ConversationController.listMessages),
 );
+conversationRouter.patch("/:conversationId", asyncHandler(ConversationController.update));
 conversationRouter.delete("/:conversationId", asyncHandler(ConversationController.delete));

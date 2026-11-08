@@ -88,6 +88,26 @@ export class ConversationService {
     }
 
     /**
+     * Renames a conversation.
+     *
+     * @param workspaceId - Workspace the conversation belongs to
+     * @param conversationId - Conversation to rename
+     * @param userId - Requesting user
+     * @param title - New title (already validated)
+     * @returns The updated conversation
+     * @throws {APIError} NotFound when the conversation does not exist in this workspace
+     */
+    static async rename(
+        workspaceId: string,
+        conversationId: string,
+        userId: string,
+        title: string,
+    ) {
+        await this.get(workspaceId, conversationId, userId);
+        return ConversationRepository.update(conversationId, { title });
+    }
+
+    /**
      * Deletes a conversation and all its messages (cascade).
      *
      * @param workspaceId - Workspace the conversation belongs to
