@@ -30,8 +30,11 @@ const EXTERNAL = args.has("--external");
 /** Leave created workspaces in place for inspection (`--keep`). */
 const KEEP = args.has("--keep");
 
-/** Delay between status polls. */
-const POLL_INTERVAL_MS = 2_000;
+/** Delay between status polls. Each poll is a request, and the API allows 300 per 15 minutes per IP. */
+const POLL_INTERVAL_MS = 3_000;
+
+/** Requests sent by this run; reported at the end because the API rate limit is 300 per 15 minutes per IP. */
+let requestCount = 0;
 /** How long to wait for a source to finish indexing. */
 const SOURCE_TIMEOUT_MS = 90_000;
 /** How long to wait for an artifact to finish generating. */
@@ -91,6 +94,7 @@ class Client {
             body = options.form;
         }
 
+        requestCount += 1;
         const res = await fetch(`${BASE_URL}${path}`, { method, headers, body });
 
         for (const cookie of res.headers.getSetCookie()) {
@@ -1489,6 +1493,9 @@ async function main() {
         `\n\x1b[1mResult:\x1b[0m \x1b[32m${count("PASS")} passed\x1b[0m, \x1b[31m${count("FAIL")} failed\x1b[0m, \x1b[33m${count("SKIP")} skipped\x1b[0m`,
     );
     for (const r of failed) console.log(`  \x1b[31m✘\x1b[0m [${r.section}] ${r.name}: ${r.detail}`);
+    console.log(
+        `\x1b[2m${requestCount} requests sent (the API allows 300 per 15 minutes per IP; wait before re-running if you are close)\x1b[0m`,
+    );
     console.log(`\x1b[2mTest users (not deleted): ${userA.email}, ${userB.email}\x1b[0m`);
     process.exit(failed.length > 0 ? 1 : 0);
 }
