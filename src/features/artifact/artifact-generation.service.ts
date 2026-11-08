@@ -2,7 +2,9 @@ import { generateText, Output } from "ai";
 import { openai } from "../../config/openai.js";
 import {
     ARTIFACT_PROMPTS,
+    ARTIFACT_TITLE_SYSTEM,
     artifactSystem,
+    artifactTitlePrompt,
     condenseSourcePrompt,
     condenseSourceSystem,
 } from "../../config/prompts.js";
@@ -25,6 +27,7 @@ import { MessageRepository } from "../conversation/message.repository.js";
 import { SourceService } from "../source/source.service.js";
 import type { ArtifactRecord } from "./artifact.repository.js";
 import { APIError } from "../../shared/http/api-error.js";
+import { logger } from "../../config/logger.js";
 
 /** Characters reserved for per-source headers and separators in the combined context. */
 const CONTEXT_OVERHEAD_CHARS = 2_000;
@@ -390,6 +393,38 @@ export class ArtifactGenerationService {
             text: `# Conversation\n\n${kept.join("\n\n")}`,
             sources: [] as ContextSource[],
         };
+    }
+
+    /**
+     * Asks the model for a short title that names the topic of a generated artifact.
+     *
+     * Best effort: any failure or an unusable answer returns `null` so the caller keeps the
+     * existing title instead of failing the artifact.
+     *
+     * @param type - Artifact type
+     * @param content - The generated content
+     * @returns A cleaned title of at most 80 characters, or `null`
+     */
+    static async generateTitle(type: ArtifactRecord["type"], content: unknown) {
+        try {
+            const { text } = await generateText({
+                model: openai(CHAT_MODEL),
+                system: ARTIFACT_TITLE_SYSTEM,
+                prompt: artifactTitlePrompt(type, JSON.stringify(content).slice(0, 6_000)),
+                maxOutputTokens: 30,
+                telemetry: { functionId: "artifact-title" },
+            });
+
+            const title = text
+                .trim()
+                .replace(/^["'\u201c\u2018]+|["'\u201d\u2019.]+$/g, "")
+                .trim()
+                .slice(0, 80);
+            return title.length >= 2 ? title : null;
+        } catch (error) {
+            logger.warn({ kind: "artifact", type, err: error }, "Artifact title generation failed");
+            return null;
+        }
     }
 
     /**
