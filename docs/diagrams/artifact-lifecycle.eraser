@@ -14,3 +14,5 @@ Start > PENDING: POST /artifacts
 PENDING > PROCESSING: Inngest job starts
 PROCESSING > READY: content generated
 PROCESSING > FAILED: generation error
+READY > PENDING: regenerate
+FAILED > PENDING: regenerate

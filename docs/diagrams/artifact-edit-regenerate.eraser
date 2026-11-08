@@ -1,0 +1,21 @@
+// Grounded Brain: editing and regenerating an artifact
+// Eraser "Sequence Diagram" diagram-as-code. Paste into a new Sequence diagram at https://app.eraser.io
+title Edit and regenerate an artifact
+autoNumber on
+
+Client [icon: monitor, color: gray] > ArtifactService [icon: nodejs, color: green]: PATCH /artifacts/:id {title?, content?, expectedUpdatedAt?}
+ArtifactService > Postgres [icon: postgres, color: blue]: load (ownership), require READY (409)
+ArtifactService > ArtifactService: validate content with the schema of the artifact's own type (400 + field details)
+ArtifactService > Postgres: compare-and-set UPDATE (updatedAt, status READY), metadata.userEdited = true
+ArtifactService --> Client: 200 artifact; 409 CONFLICT when stale
+
+Client > ArtifactService: POST /artifacts/:id/regenerate {force?}
+alt [label: edited and not force] {
+  ArtifactService --> Client: 409 ARTIFACT_EDITED
+}
+else [label: ok] {
+  ArtifactService > Postgres: compare-and-set status PENDING (same id and title)
+  ArtifactService > Inngest [icon: zap, color: purple]: send artifact/generate
+  ArtifactService --> Client: 202 artifact (PENDING)
+  Inngest > GenerateArtifactJob [icon: file-text, color: purple]: PROCESSING, then READY (userEdited cleared) or FAILED
+}

@@ -16,5 +16,5 @@ PENDING > PROCESSING: Inngest job starts
 PROCESSING > READY: chunks embedded and indexed
 PROCESSING > FAILED: step failed after retries
 FAILED > PENDING: reprocess
-READY > PENDING: reprocess
+READY > PENDING: reprocess or text content edited
 READY > Deleted: deleted

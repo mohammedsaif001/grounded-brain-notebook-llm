@@ -1,0 +1,19 @@
+// Grounded Brain: editing a source (title, or text/markdown content)
+// Eraser "Sequence Diagram" diagram-as-code. Paste into a new Sequence diagram at https://app.eraser.io
+title Edit a source: replace, never append
+autoNumber on
+
+Client [icon: monitor, color: gray] > SourceService [icon: nodejs, color: green]: PATCH /sources/:id {title?, content?, expectedUpdatedAt?}
+SourceService > Postgres [icon: postgres, color: blue]: load source (ownership); 400 non-text content, 409 PENDING or PROCESSING
+alt [label: title only] {
+  SourceService > Pinecone [icon: database, color: blue]: update sourceTitle on each chunk vector (no re-embedding)
+  SourceService > Postgres: compare-and-set UPDATE where updatedAt = read value and status idle
+}
+else [label: content changed] {
+  SourceService > Postgres: compare-and-set UPDATE content, wordCount, status PENDING
+  SourceService > Postgres: delete chunks
+  SourceService > Pinecone: delete vectors for the source
+  SourceService > Inngest [icon: zap, color: purple]: send source/created
+  Inngest > ProcessSourceJob [icon: file-text, color: purple]: re-chunk, embed, upsert, READY
+}
+SourceService --> Client: 200 source (same shape as GET, with content); 409 CONFLICT when stale
