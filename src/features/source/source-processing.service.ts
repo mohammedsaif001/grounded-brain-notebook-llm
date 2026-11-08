@@ -255,6 +255,7 @@ export class SourceProcessingService {
                         sourceTitle: source.title,
                         sourceType: source.type,
                         text: chunk.content.slice(0, 35000),
+                        excluded: chunk.excluded,
                         chunkTotal: chunks.length,
                         ...(typeof chunkMetadata.page === "number"
                             ? { page: chunkMetadata.page }

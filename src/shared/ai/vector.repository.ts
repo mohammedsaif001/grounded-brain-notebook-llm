@@ -67,11 +67,34 @@ export class VectorRepository {
         const result = await timed(
             "pinecone",
             "query",
-            () => index.namespace(workspaceId).query({ vector, topK, includeMetadata: true }),
+            () =>
+                index.namespace(workspaceId).query({
+                    vector,
+                    topK,
+                    includeMetadata: true,
+                    // Chunks the user excluded stay indexed but never reach the model.
+                    filter: { excluded: { $ne: true } },
+                }),
             { topK },
         );
 
         return result.matches ?? [];
+    }
+
+    /**
+     * Merges metadata into one vector without re-embedding it.
+     *
+     * @param workspaceId - Namespace containing the vector
+     * @param id - Vector id (the chunk id)
+     * @param metadata - Fields to set; other metadata is left as is
+     */
+    static async updateMetadata(
+        workspaceId: string,
+        id: string,
+        metadata: Partial<VectorMetadata>,
+    ) {
+        const index = await PineconeClient.getIndex();
+        await ignoreMissingNamespace(() => index.namespace(workspaceId).update({ id, metadata }));
     }
 
     /**

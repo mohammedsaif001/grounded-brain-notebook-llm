@@ -23,6 +23,8 @@ export type VectorMetadata = {
     sourceTitle: string;
     sourceType: string;
     text: string;
+    /** Set on chunks the user excluded; retrieval filters them out. */
+    excluded?: boolean;
     page?: number;
     /** PDF chapter (top-level bookmark) the chunk falls under. */
     chapter?: string;

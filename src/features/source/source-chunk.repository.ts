@@ -9,6 +9,7 @@ export const sourceChunkSelect = {
     content: true,
     tokenCount: true,
     metadata: true,
+    excluded: true,
     createdAt: true,
 } as const;
 
@@ -36,6 +37,63 @@ export class SourceChunkRepository {
     static findAllBySourceId(sourceId: string) {
         return prisma.sourceChunk.findMany({
             where: { sourceId },
+            select: sourceChunkSelect,
+            orderBy: { index: "asc" },
+        });
+    }
+
+    /**
+     * Finds one chunk, only if it belongs to the given source.
+     *
+     * @param chunkId - Chunk id
+     * @param sourceId - Source it must belong to
+     * @returns The chunk, or `null` when not found in that source
+     */
+    static findByIdAndSourceId(chunkId: string, sourceId: string) {
+        return prisma.sourceChunk.findFirst({
+            where: { id: chunkId, sourceId },
+            select: sourceChunkSelect,
+        });
+    }
+
+    /**
+     * Flags a chunk as excluded from (or included in) retrieval and artifact generation.
+     *
+     * @param chunkId - Chunk to update
+     * @param excluded - New flag value
+     * @returns The updated chunk
+     */
+    static setExcluded(chunkId: string, excluded: boolean) {
+        return prisma.sourceChunk.update({
+            where: { id: chunkId },
+            data: { excluded },
+            select: sourceChunkSelect,
+        });
+    }
+
+    /**
+     * Finds which of the given sources have at least one excluded chunk.
+     *
+     * @param sourceIds - Sources to check
+     * @returns The ids of sources that have excluded chunks
+     */
+    static async findSourceIdsWithExcluded(sourceIds: string[]) {
+        const rows = await prisma.sourceChunk.findMany({
+            where: { sourceId: { in: sourceIds }, excluded: true },
+            select: { sourceId: true },
+            distinct: ["sourceId"],
+        });
+        return rows.map((row) => row.sourceId);
+    }
+
+    /**
+     * Returns a source's chunks that are not excluded, in order.
+     *
+     * @param sourceId - Source whose chunks to read
+     */
+    static findIncludedBySourceId(sourceId: string) {
+        return prisma.sourceChunk.findMany({
+            where: { sourceId, excluded: false },
             select: sourceChunkSelect,
             orderBy: { index: "asc" },
         });
