@@ -19,6 +19,7 @@ export type APIErrorCode =
     | "FORBIDDEN"
     | "NOT_FOUND"
     | "CONFLICT"
+    | "ARTIFACT_EDITED"
     | "PAYLOAD_TOO_LARGE"
     | "TOO_MANY_REQUESTS"
     | "INTERNAL_SERVER_ERROR"
@@ -106,6 +107,33 @@ export class APIError extends Error {
      */
     static Conflict(message = "Conflict") {
         return new APIError(409, "CONFLICT", message);
+    }
+
+    /**
+     * 409 `CONFLICT` — an optimistic-concurrency check failed: the item was changed (by another
+     * tab, device or background job) since the client loaded it.
+     *
+     * @returns An {@link APIError} ready to `throw`
+     */
+    static StaleWrite() {
+        return new APIError(
+            409,
+            "CONFLICT",
+            "This item was changed elsewhere. Reload and try again.",
+        );
+    }
+
+    /**
+     * 409 `ARTIFACT_EDITED` — the artifact holds the user's edits and the action would overwrite
+     * them; the client should ask for confirmation and retry with `force`.
+     *
+     * @param message - Client-safe error message
+     * @returns An {@link APIError} ready to `throw`
+     */
+    static ArtifactEdited(
+        message = "This artifact has been edited. Regenerating will discard your changes.",
+    ) {
+        return new APIError(409, "ARTIFACT_EDITED", message);
     }
 
     /**
