@@ -106,23 +106,29 @@ cookie jar. Requests must come from the `CLIENT_URL` origin. All `/api/workspace
   Without `limit` the whole list comes back, as before. Every response carries
   `meta: { "total": <matching rows>, "nextCursor": "<id>" | null }`; pass `nextCursor` as `cursor`
   to get the next page, and stop when it is `null`.
+- **Optimistic concurrency.** `PATCH` on a source or an artifact accepts `expectedUpdatedAt` (the
+  `updatedAt` you last read). If the item changed since, the request is rejected with **409**
+  `CONFLICT` and nothing is written; reload and retry. The check and the write are one atomic
+  statement, so two simultaneous edits from the same version can never both succeed. Sources and
+  artifacts return `updatedAt` everywhere they are returned.
 - `POST /chat` is the exception: it returns a **stream**, not JSON.
 - Every response has an **`X-Request-Id`** header. Send your own `X-Request-Id` to correlate with server logs.
 - Resources that exist but belong to someone else return **404** (not 403).
 
 ### Error codes
 
-| Status | Code                    | Typical cause                                                     |
-| ------ | ----------------------- | ----------------------------------------------------------------- |
-| 400    | `VALIDATION_ERROR`      | Body/params/query failed validation; `details` has field errors   |
-| 400    | `BAD_REQUEST`           | Invalid JSON, bad PDF, no ready sources, invalid YouTube URL, ... |
-| 401    | `UNAUTHORIZED`          | No or expired session                                             |
-| 404    | `NOT_FOUND`             | Unknown route, or the resource isn't yours                        |
-| 409    | `CONFLICT`              | Unique constraint (e.g. email already registered)                 |
-| 413    | `PAYLOAD_TOO_LARGE`     | Body > 2 MB or PDF > 10 MB                                        |
-| 429    | `TOO_MANY_REQUESTS`     | Rate limit hit, or the OpenAI queue is full                       |
-| 500    | `INTERNAL_SERVER_ERROR` | Unexpected; check the server log for the request id               |
-| 503    | `SERVICE_UNAVAILABLE`   | Integration not configured, or database/AI provider unavailable   |
+| Status | Code                    | Typical cause                                                       |
+| ------ | ----------------------- | ------------------------------------------------------------------- |
+| 400    | `VALIDATION_ERROR`      | Body/params/query failed validation; `details` has field errors     |
+| 400    | `BAD_REQUEST`           | Invalid JSON, bad PDF, no ready sources, invalid YouTube URL, ...   |
+| 401    | `UNAUTHORIZED`          | No or expired session                                               |
+| 404    | `NOT_FOUND`             | Unknown route, or the resource isn't yours                          |
+| 409    | `CONFLICT`              | Unique constraint, a stale `expectedUpdatedAt`, or still processing |
+| 409    | `ARTIFACT_EDITED`       | Regenerating an artifact the user edited, without `force`           |
+| 413    | `PAYLOAD_TOO_LARGE`     | Body > 2 MB or PDF > 10 MB                                          |
+| 429    | `TOO_MANY_REQUESTS`     | Rate limit hit, or the OpenAI queue is full                         |
+| 500    | `INTERNAL_SERVER_ERROR` | Unexpected; check the server log for the request id                 |
+| 503    | `SERVICE_UNAVAILABLE`   | Integration not configured, or database/AI provider unavailable     |
 
 Validation error example:
 
@@ -139,11 +145,12 @@ Validation error example:
 
 ### Rate limits
 
-| Scope                                     | Limit                        |
-| ----------------------------------------- | ---------------------------- |
-| All `/api` routes                         | 300 requests / 15 min per IP |
-| `POST /chat`, `POST /artifacts`           | 20 / min per user            |
-| Source create, upload, imports, reprocess | 30 / 10 min per user         |
+| Scope                                              | Limit                        |
+| -------------------------------------------------- | ---------------------------- |
+| All `/api` routes                                  | 300 requests / 15 min per IP |
+| `POST /chat`, `POST /artifacts`                    | 20 / min per user            |
+| `POST /artifacts/:id/regenerate`                   | 20 / min per user (AI limit) |
+| Source create, upload, imports, reprocess, `PATCH` | 30 / 10 min per user         |
 
 Over the limit: **429**. `RateLimit-*` response headers show the remaining budget.
 
@@ -311,19 +318,40 @@ Statuses: `PENDING` → `PROCESSING` → `READY` | `FAILED`.
 List responses leave out `content` (it can be very large). See
 [DATABASE.md](DATABASE.md#sourcemetadata-sourcemetadata-in-source-processingservicets) for every `metadata` field.
 
-| Request                    | Endpoint                                        | Body / query                                                  | Success                                                 |
-| -------------------------- | ----------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------- |
-| Create TEXT source         | `POST /`                                        | `{ "type": "TEXT", "title" (≤200), "content" }`               | **201** source (`PENDING`)                              |
-| Create MARKDOWN source     | `POST /`                                        | `{ "type": "MARKDOWN", "title", "content" }`                  | **201** source (`PENDING`)                              |
-| Wait until source is READY | `GET /:sourceId`                                | –                                                             | **200**; poll until `status` is `READY`                 |
-| List sources               | `GET /`                                         | `limit`, `cursor` (see Pagination)                            | **200** array (no `content`), newest first, plus `meta` |
-| List sources (filtered)    | `GET /?type=TEXT&status=READY&q=photosynthesis` | `type`, `status`, `q` (title or content, case-insensitive)    | **200** array, plus `meta`                              |
-| Get source                 | `GET /:sourceId`                                | –                                                             | **200** source with `content`                           |
-| Get source chunks          | `GET /:sourceId/chunks`                         | –                                                             | **200** `{ chunks: [...], count }`                      |
-| Reprocess one source       | `POST /:sourceId/reprocess`                     | –                                                             | **202** `{ reprocessed: true }`                         |
-| Reprocess sources          | `POST /reprocess`                               | `{}` (all FAILED) or `{ "sourceIds": [...] }` (exactly those) | **200** `{ reprocessed, results }`                      |
-| Delete source              | `DELETE /:sourceId`                             | –                                                             | **204**                                                 |
-| Bulk delete sources        | `POST /bulk-delete`                             | `{ "sourceIds": ["...", "..."] }` (≥1)                        | **200** `{ deleted, results }`                          |
+| Request                    | Endpoint                                        | Body / query                                                           | Success                                                 |
+| -------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------- |
+| Create TEXT source         | `POST /`                                        | `{ "type": "TEXT", "title" (≤200), "content" }`                        | **201** source (`PENDING`)                              |
+| Create MARKDOWN source     | `POST /`                                        | `{ "type": "MARKDOWN", "title", "content" }`                           | **201** source (`PENDING`)                              |
+| Wait until source is READY | `GET /:sourceId`                                | –                                                                      | **200**; poll until `status` is `READY`                 |
+| List sources               | `GET /`                                         | `limit`, `cursor` (see Pagination)                                     | **200** array (no `content`), newest first, plus `meta` |
+| List sources (filtered)    | `GET /?type=TEXT&status=READY&q=photosynthesis` | `type`, `status`, `q` (title or content, case-insensitive)             | **200** array, plus `meta`                              |
+| Get source                 | `GET /:sourceId`                                | –                                                                      | **200** source with `content`                           |
+| Get source chunks          | `GET /:sourceId/chunks`                         | –                                                                      | **200** `{ chunks: [...], count }`                      |
+| Reprocess one source       | `POST /:sourceId/reprocess`                     | –                                                                      | **202** `{ reprocessed: true }`                         |
+| Reprocess sources          | `POST /reprocess`                               | `{}` (all FAILED) or `{ "sourceIds": [...] }` (exactly those)          | **200** `{ reprocessed, results }`                      |
+| Edit source                | `PATCH /:sourceId`                              | `{ "title"?, "content"?, "expectedUpdatedAt"? }` (≥1 of title/content) | **200** source with `content`                           |
+| Exclude / include a chunk  | `PATCH /:sourceId/chunks/:chunkId`              | `{ "excluded": true }`                                                 | **200** chunk                                           |
+| Delete source              | `DELETE /:sourceId`                             | –                                                                      | **204**                                                 |
+| Bulk delete sources        | `POST /bulk-delete`                             | `{ "sourceIds": ["...", "..."] }` (≥1)                                 | **200** `{ deleted, results }`                          |
+
+**Editing a source: `PATCH /:sourceId`.** Body `{ "title"?: 1-200, "content"?: non-empty, "expectedUpdatedAt"?: ISO }`;
+unknown keys are rejected. Returns the source exactly as `GET /:sourceId` does.
+
+- **Title** (any source type): saved, and the vectors' `sourceTitle` is updated so chat citations show the
+  new title. No re-embedding; the source stays `READY`.
+- **Content** (`TEXT` and `MARKDOWN` only; others get **400** "Content can only be edited for text and
+  markdown sources"): the new text **replaces** the old. The old chunks and vectors are deleted, the
+  source goes back to `PENDING` and through ingestion, and the new chunks are embedded from the new text
+  only. Nothing is appended, so no mix of old and new text can be retrieved. Poll until `READY`. Sending
+  the content the source already has changes nothing.
+- **409** while the source is `PENDING` or `PROCESSING`; **409 `CONFLICT`** when `expectedUpdatedAt` is stale.
+- Earlier chat messages keep the citation text they were saved with, and artifacts already generated keep
+  what they were built from; regenerate an artifact to pick up an edit.
+
+**Excluding a chunk: `PATCH /:sourceId/chunks/:chunkId`.** Body `{ "excluded": boolean }` (strict).
+Excluded chunks stay indexed but are skipped by chat retrieval (the vector query filters them out) and
+left out of artifact generation. Nothing is re-embedded. Returns the chunk. **404** for an unknown chunk,
+**409** while the source is processing. Flags do not survive a re-index (re-indexing creates new chunks).
 
 **Bulk behaviour.** Both bulk endpoints are per-id, not all-or-nothing: one bad id never stops or
 undoes the others, and the response lists what happened to every id.
@@ -360,17 +388,23 @@ Chunk object (from `/chunks`):
     "content": "Photosynthesis turns light...",
     "tokenCount": 212,
     "metadata": { "page": 1 },
+    "excluded": false,
     "createdAt": "2026-10-20T10:00:04.000Z"
 }
 ```
 
 Negative tests:
 
-| Request                                   | Expect                                                                               |
-| ----------------------------------------- | ------------------------------------------------------------------------------------ |
-| [400] PDF type via JSON                   | 400 `VALIDATION_ERROR` (only `TEXT`/`MARKDOWN` via `POST /`; use `/upload` for PDFs) |
-| [400] Invalid type filter (`?type=VIDEO`) | 400 `VALIDATION_ERROR`                                                               |
-| [404] Get nonexistent source              | 404 `NOT_FOUND`                                                                      |
+| Request                                     | Expect                                                                               |
+| ------------------------------------------- | ------------------------------------------------------------------------------------ |
+| [400] PDF type via JSON                     | 400 `VALIDATION_ERROR` (only `TEXT`/`MARKDOWN` via `POST /`; use `/upload` for PDFs) |
+| [400] Invalid type filter (`?type=VIDEO`)   | 400 `VALIDATION_ERROR`                                                               |
+| [404] Get nonexistent source                | 404 `NOT_FOUND`                                                                      |
+| [400] Edit source with an empty body        | 400 `VALIDATION_ERROR`                                                               |
+| [400] Edit content of a PDF source          | 400 `BAD_REQUEST` (title edits are allowed for every type)                           |
+| [409] Edit with a stale `expectedUpdatedAt` | 409 `CONFLICT`                                                                       |
+| [409] Edit a source that is processing      | 409 `CONFLICT`                                                                       |
+| [404] Exclude a nonexistent chunk           | 404 `NOT_FOUND`                                                                      |
 
 ---
 
@@ -561,6 +595,7 @@ If a workspace has no READY sources, chat still answers from general knowledge a
 | List conversations                         | `GET /`                         | –                                           | **200** array, most recently active first |
 | Create empty conversation                  | `POST /`                        | `{ "title": "Exam prep" }` (optional, ≤120) | **201** conversation                      |
 | Get messages                               | `GET /:conversationId/messages` | –                                           | **200** array, oldest first               |
+| Rename conversation                        | `PATCH /:conversationId`        | `{ "title": "Exam prep v2" }` (1-120)       | **200** updated conversation              |
 | Delete conversation                        | `DELETE /:conversationId`       | –                                           | **204** (messages deleted too)            |
 | [404] Messages of nonexistent conversation | `GET /does-not-exist/messages`  | –                                           | 404                                       |
 
@@ -671,6 +706,68 @@ From a conversation the artifact's `sourceIds` are the sources its replies cited
 `metadata.conversationId` records where it came from. Items get empty `citations` arrays, since a
 transcript has no numbered sources.
 
+The default title (`Mind Map · 10/20/2026`) is replaced, once generation finishes, by a short title the
+model writes from the content. A title you sent, or later set with `PATCH`, is never changed.
+
+### Edit: `PATCH /:artifactId`
+
+```json
+{
+    "title": "Photosynthesis quiz",
+    "content": { "questions": ["..."] },
+    "expectedUpdatedAt": "2026-10-20T10:02:00.000Z"
+}
+```
+
+At least one of `title` (1-200) or `content` (an object); unknown keys, including `type`, are rejected.
+Only `READY` artifacts can be edited (**409** otherwise). Returns the artifact as `GET /:artifactId` does.
+
+`content` must match the stored shape of the artifact's own type (the same shapes generation produces).
+On failure: **400** `VALIDATION_ERROR` with field-level `details`, keyed by dotted path, e.g.
+`{ "content.questions.0.correctIndex": ["correctIndex must point at one of the options"] }`.
+
+| Type         | Stored `content`                                                                             | Extra rules                                          |
+| ------------ | -------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `SUMMARY`    | `{ markdown, citations[] }`                                                                  |                                                      |
+| `TAKEAWAYS`  | `{ items: string[3-20] }`                                                                    |                                                      |
+| `FLASHCARDS` | `{ cards: [{ front, back, citations[] }] }` (3-30)                                           |                                                      |
+| `QUIZ`       | `{ questions: [{ question, options[2-5], correctIndex, explanation, citations[] }] }` (3-15) | `correctIndex` < `options.length`                    |
+| `MINDMAP`    | `{ nodes: [{ id, label }] (2-40), edges: [{ id, source, target }] }`                         | unique node ids; every edge ends on an existing node |
+| `REPORT`     | `{ markdown, sections: [{ title, content, citations[] }] }`                                  |                                                      |
+| `WIKI`       | `{ overview, techStack[], architecture, diagram, modules[], gettingStarted }`                |                                                      |
+
+A citation is `{ marker: int, sourceId, label }`. Citations are stored as sent, so an edited item keeps
+its citations; `citations` may be omitted on a new item. Editing `content` sets
+`metadata.userEdited: true` and `metadata.editedAt`; renaming alone does not. **409 `CONFLICT`** when
+`expectedUpdatedAt` is stale.
+
+### Regenerate: `POST /:artifactId/regenerate`
+
+Body `{ "force"?: boolean }`. Re-runs generation **in place**: same id and title, using the sources it was
+built from (or the READY sources if none were recorded), or its conversation. Rate limited like creation.
+Returns **202** with the artifact (`PENDING`); poll `GET /:artifactId`. The old content stays visible until
+the new content replaces it, and `metadata.userEdited` is cleared on success.
+
+- **409 `ARTIFACT_EDITED`** when the artifact was edited and `force` is not `true`: ask the user, then
+  retry with `{ "force": true }`.
+- **409 `CONFLICT`** while it is `PENDING` or `PROCESSING`.
+- **400** when no READY sources are left to build it from.
+
+### List: `GET /?q=&type=&status=&limit=&cursor=`
+
+`q` is a case-insensitive match on the title. With no parameters the response is unchanged. Always
+`{ data: [...], meta: { total, nextCursor } }`.
+
+### Bulk delete: `POST /bulk-delete`
+
+```json
+{ "artifactIds": ["cm2art...", "cm2art2..."] }
+```
+
+1-100 ids. Per-id and not atomic, like the sources endpoint. **200**
+`{ "deleted": 2, "results": [{ "artifactId", "status": "deleted" | "not_found" | "failed" }] }`.
+Ids are de-duplicated; ids from other workspaces are `not_found`.
+
 ### Seen / unseen: `POST /:artifactId/viewed`
 
 Records the first time the user opened an artifact (**204**, safe to repeat). `viewedAt` on the
@@ -723,17 +820,23 @@ boundaries.
 | `REPORT`     | `{ "markdown": "...", "sections": [{ "title", "content", "citations": [Citation] }] }`                                                                                                                                    |
 | `WIKI`       | `{ "overview", "techStack": [{ "name", "purpose" }], "architecture", "diagram", "modules": [{ "name", "path", "description", "keyFiles" }], "gettingStarted" }` (`diagram` is raw Mermaid; needs a READY `GITHUB` source) |
 
-| Request                                                    | Endpoint                                   | Success                                  |
-| ---------------------------------------------------------- | ------------------------------------------ | ---------------------------------------- |
-| Create SUMMARY / TAKEAWAYS / FLASHCARDS / MINDMAP / REPORT | `POST /` with `{ "type": "..." }`          | **201** (`PENDING`)                      |
-| Create QUIZ (custom title, selected sources)               | `POST /` with `type`, `title`, `sourceIds` | **201**                                  |
-| Wait until artifact is READY                               | `GET /:artifactId` (polls in the Runner)   | **200**                                  |
-| Get artifact                                               | `GET /:artifactId`                         | **200**                                  |
-| List artifacts                                             | `GET /` (`?type=&status=&limit=&cursor=`)  | **200** array, newest first, plus `meta` |
-| Mark artifact opened                                       | `POST /:artifactId/viewed`                 | **204**                                  |
-| Delete artifact                                            | `DELETE /:artifactId`                      | **204**                                  |
-| [400] Unknown type (`"POEM"`)                              | `POST /`                                   | 400 `VALIDATION_ERROR`                   |
-| [404] Get nonexistent artifact                             | `GET /does-not-exist`                      | 404                                      |
+| Request                                                    | Endpoint                                     | Success                                  |
+| ---------------------------------------------------------- | -------------------------------------------- | ---------------------------------------- |
+| Create SUMMARY / TAKEAWAYS / FLASHCARDS / MINDMAP / REPORT | `POST /` with `{ "type": "..." }`            | **201** (`PENDING`)                      |
+| Create QUIZ (custom title, selected sources)               | `POST /` with `type`, `title`, `sourceIds`   | **201**                                  |
+| Wait until artifact is READY                               | `GET /:artifactId` (polls in the Runner)     | **200**                                  |
+| Get artifact                                               | `GET /:artifactId`                           | **200**                                  |
+| List artifacts                                             | `GET /` (`?q=&type=&status=&limit=&cursor=`) | **200** array, newest first, plus `meta` |
+| Rename / edit artifact                                     | `PATCH /:artifactId`                         | **200** artifact                         |
+| Regenerate artifact                                        | `POST /:artifactId/regenerate`               | **202** (`PENDING`)                      |
+| Bulk delete artifacts                                      | `POST /bulk-delete`                          | **200** `{ deleted, results }`           |
+| Mark artifact opened                                       | `POST /:artifactId/viewed`                   | **204**                                  |
+| Delete artifact                                            | `DELETE /:artifactId`                        | **204**                                  |
+| [400] Unknown type (`"POEM"`)                              | `POST /`                                     | 400 `VALIDATION_ERROR`                   |
+| [404] Get nonexistent artifact                             | `GET /does-not-exist`                        | 404                                      |
+| [400] Edit with invalid content / empty body               | `PATCH /:artifactId`                         | 400 `VALIDATION_ERROR`                   |
+| [409] Edit with a stale `expectedUpdatedAt`                | `PATCH /:artifactId`                         | 409 `CONFLICT`                           |
+| [409] Regenerate an edited artifact without `force`        | `POST /:artifactId/regenerate`               | 409 `ARTIFACT_EDITED`                    |
 
 ---
 
@@ -760,7 +863,8 @@ Deletes everything the run created, then signs out.
 | Request                                          | Expect |
 | ------------------------------------------------ | ------ |
 | Delete artifact / memory / conversation / source | 204    |
-| Bulk delete sources                              | 204    |
+| Bulk delete artifacts                            | 200    |
+| Bulk delete sources                              | 200    |
 | Delete workspace                                 | 204    |
 | [404] Get deleted workspace                      | 404    |
 | Sign out                                         | 200    |
@@ -798,8 +902,10 @@ With no session, protected routes return **401 `UNAUTHORIZED`**:
 | POST   | `/api/workspaces/:workspaceId/sources/bulk-delete`                    | ✓      | 200          | Per-id results                    |
 | POST   | `/api/workspaces/:workspaceId/sources/reprocess`                      | ✓      | 200          | FAILED, or the given ids · limit  |
 | GET    | `/api/workspaces/:workspaceId/sources/:sourceId`                      | ✓      | 200          |                                   |
+| PATCH  | `/api/workspaces/:workspaceId/sources/:sourceId`                      | ✓      | 200          | Title / text content · limit      |
 | DELETE | `/api/workspaces/:workspaceId/sources/:sourceId`                      | ✓      | 204          |                                   |
 | GET    | `/api/workspaces/:workspaceId/sources/:sourceId/chunks`               | ✓      | 200          |                                   |
+| PATCH  | `/api/workspaces/:workspaceId/sources/:sourceId/chunks/:chunkId`      | ✓      | 200          | Exclude / include a chunk         |
 | GET    | `/api/workspaces/:workspaceId/sources/:sourceId/files`                | ✓      | 200          | GITHUB only                       |
 | POST   | `/api/workspaces/:workspaceId/sources/:sourceId/sync`                 | ✓      | 202          | GITHUB only · ingestion limit     |
 | POST   | `/api/workspaces/:workspaceId/sources/:sourceId/reprocess`            | ✓      | 202          | ingestion limit                   |
@@ -807,10 +913,14 @@ With no session, protected routes return **401 `UNAUTHORIZED`**:
 | GET    | `/api/workspaces/:workspaceId/conversations`                          | ✓      | 200          |                                   |
 | POST   | `/api/workspaces/:workspaceId/conversations`                          | ✓      | 201          |                                   |
 | GET    | `/api/workspaces/:workspaceId/conversations/:conversationId/messages` | ✓      | 200          |                                   |
+| PATCH  | `/api/workspaces/:workspaceId/conversations/:conversationId`          | ✓      | 200          | Rename                            |
 | DELETE | `/api/workspaces/:workspaceId/conversations/:conversationId`          | ✓      | 204          |                                   |
-| GET    | `/api/workspaces/:workspaceId/artifacts`                              | ✓      | 200          | `?type&status&limit&cursor`       |
+| GET    | `/api/workspaces/:workspaceId/artifacts`                              | ✓      | 200          | `?q&type&status&limit&cursor`     |
 | POST   | `/api/workspaces/:workspaceId/artifacts`                              | ✓      | 201          | AI limit                          |
+| POST   | `/api/workspaces/:workspaceId/artifacts/bulk-delete`                  | ✓      | 200          | Per-id results                    |
 | GET    | `/api/workspaces/:workspaceId/artifacts/:artifactId`                  | ✓      | 200          |                                   |
+| PATCH  | `/api/workspaces/:workspaceId/artifacts/:artifactId`                  | ✓      | 200          | READY only · `expectedUpdatedAt`  |
+| POST   | `/api/workspaces/:workspaceId/artifacts/:artifactId/regenerate`       | ✓      | 202          | AI limit · `ARTIFACT_EDITED`      |
 | POST   | `/api/workspaces/:workspaceId/artifacts/:artifactId/viewed`           | ✓      | 204          | Clears the unseen state           |
 | DELETE | `/api/workspaces/:workspaceId/artifacts/:artifactId`                  | ✓      | 204          |                                   |
 | GET    | `/api/memory`                                                         | ✓      | 200          |                                   |
