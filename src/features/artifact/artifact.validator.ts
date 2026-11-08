@@ -91,8 +91,21 @@ export const updateArtifactSchema = z
         message: "Provide a title or content to update",
     });
 
+/**
+ * Body for regenerating an artifact. `force` confirms discarding the user's edits; without it an
+ * edited artifact is refused with 409 `ARTIFACT_EDITED`.
+ */
+export const regenerateArtifactSchema = z
+    .object({
+        force: z.boolean().optional(),
+    })
+    .strict();
+
 /** Validated query for listing artifacts. */
 export type ListArtifactsQuery = z.infer<typeof listArtifactsQuerySchema>;
+
+/** Validated body for regenerating an artifact. */
+export type RegenerateArtifactInput = z.infer<typeof regenerateArtifactSchema>;
 
 /** Validated body for editing an artifact. */
 export type UpdateArtifactInput = z.infer<typeof updateArtifactSchema>;

@@ -12,5 +12,10 @@ artifactRouter.post("/", aiRateLimiter, asyncHandler(ArtifactController.create))
 artifactRouter.post("/bulk-delete", asyncHandler(ArtifactController.bulkDelete));
 artifactRouter.get("/:artifactId", asyncHandler(ArtifactController.get));
 artifactRouter.patch("/:artifactId", asyncHandler(ArtifactController.update));
+artifactRouter.post(
+    "/:artifactId/regenerate",
+    aiRateLimiter,
+    asyncHandler(ArtifactController.regenerate),
+);
 artifactRouter.post("/:artifactId/viewed", asyncHandler(ArtifactController.markViewed));
 artifactRouter.delete("/:artifactId", asyncHandler(ArtifactController.delete));

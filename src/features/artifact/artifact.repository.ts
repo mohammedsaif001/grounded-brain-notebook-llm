@@ -199,6 +199,36 @@ export class ArtifactRepository {
     }
 
     /**
+     * Moves an artifact back to `PENDING` for regeneration, only if it is still as the caller
+     * read it and is not already queued or running (one atomic compare-and-set). Its content
+     * and title are kept until the new content replaces them.
+     *
+     * @param artifactId - Artifact to regenerate
+     * @param workspaceId - Workspace it must belong to
+     * @param expectedUpdatedAt - The `updatedAt` the caller read
+     * @param metadata - Metadata to store (without the previous failure message)
+     * @returns The artifact, or `null` when it changed, is already generating, or is gone
+     */
+    static async markPendingIfIdle(
+        artifactId: string,
+        workspaceId: string,
+        expectedUpdatedAt: Date,
+        metadata: Prisma.InputJsonValue,
+    ) {
+        const { count } = await prisma.learningArtifact.updateMany({
+            where: {
+                id: artifactId,
+                workspaceId,
+                updatedAt: expectedUpdatedAt,
+                status: { in: ["READY", "FAILED"] },
+            },
+            data: { status: "PENDING", metadata },
+        });
+
+        return count === 1 ? this.findByIdAndWorkspaceId(artifactId, workspaceId) : null;
+    }
+
+    /**
      * Deletes an artifact.
      *
      * @param artifactId - Artifact to delete

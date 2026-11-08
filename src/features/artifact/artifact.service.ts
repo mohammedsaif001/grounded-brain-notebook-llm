@@ -9,6 +9,7 @@ import { APIError } from "../../shared/http/api-error.js";
 import type {
     CreateArtifactInput,
     ListArtifactsQuery,
+    RegenerateArtifactInput,
     UpdateArtifactInput,
 } from "./artifact.validator.js";
 import { artifactContentSchemas } from "./artifact-content.schema.js";
@@ -305,6 +306,72 @@ export class ArtifactService {
     }
 
     /**
+     * Re-runs generation for an existing artifact, in place: same id and title, using the
+     * sources it was built from (or the workspace's READY sources if none were recorded), or
+     * its conversation.
+     *
+     * The artifact goes back to `PENDING` and is picked up by the worker like a new one. Its old
+     * content stays visible until the new content is ready. An artifact the user has edited is
+     * only regenerated with `force`, since that discards the edits.
+     *
+     * @param workspaceId - Workspace the artifact belongs to
+     * @param artifactId - Artifact to regenerate
+     * @param userId - Requesting user; must own the workspace
+     * @param input - `force` confirms discarding the user's edits
+     * @returns The artifact with status `PENDING`
+     * @throws {APIError} NotFound, Conflict while it is generating or when it changed meanwhile,
+     *   `ARTIFACT_EDITED` for an edited artifact without `force`, BadRequest when no ready
+     *   sources are left to build it from
+     */
+    static async regenerate(
+        workspaceId: string,
+        artifactId: string,
+        userId: string,
+        input: RegenerateArtifactInput = {},
+    ) {
+        const artifact = await this.get(workspaceId, artifactId, userId);
+
+        if (artifact.status === "PENDING" || artifact.status === "PROCESSING") {
+            throw APIError.Conflict("This artifact is already being generated");
+        }
+
+        const { processingError: _cleared, ...metadata } = readObject(artifact.metadata);
+        if (metadata.userEdited === true && !input.force) {
+            throw APIError.ArtifactEdited();
+        }
+
+        // Fail here, not in the worker, when nothing is left to build it from.
+        if (typeof metadata.conversationId !== "string") {
+            await ArtifactGenerationService.resolveReadySourceIds(
+                workspaceId,
+                artifact.sourceIds,
+                artifact.type === "WIKI" ? "GITHUB" : undefined,
+            );
+        }
+
+        const queued = await ArtifactRepository.markPendingIfIdle(
+            artifactId,
+            workspaceId,
+            artifact.updatedAt,
+            metadata as Prisma.InputJsonObject,
+        );
+        if (!queued) {
+            throw APIError.Conflict(
+                "This artifact changed or started generating. Reload and retry.",
+            );
+        }
+
+        try {
+            await EventPublisher.artifactRequested({ artifactId, workspaceId });
+        } catch (error) {
+            await ArtifactRepository.update(artifactId, { status: "FAILED" });
+            throw error;
+        }
+
+        return queued;
+    }
+
+    /**
      * Deletes several artifacts, one by one, and reports what happened to each.
      *
      * Not atomic by design: a missing id or a failure on one artifact does not stop or undo the
@@ -412,6 +479,13 @@ export class ArtifactService {
             await ArtifactRepository.update(artifactId, {
                 status: "FAILED",
                 metadata: {
+                    // The previous content is kept on failure, so keep its edit marker too.
+                    ...(readObject(artifact.metadata).userEdited === true
+                        ? {
+                              userEdited: true,
+                              editedAt: readObject(artifact.metadata).editedAt as string,
+                          }
+                        : {}),
                     // Kept so a retry still reads the conversation it was asked to.
                     ...(origin.conversationId
                         ? { conversationId: origin.conversationId, messageIds: origin.messageIds }

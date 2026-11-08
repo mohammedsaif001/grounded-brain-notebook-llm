@@ -6,6 +6,7 @@ import {
     bulkDeleteArtifactsSchema,
     createArtifactSchema,
     listArtifactsQuerySchema,
+    regenerateArtifactSchema,
     updateArtifactSchema,
 } from "./artifact.validator.js";
 import { workspaceIdParamSchema } from "../workspace/workspace.validator.js";
@@ -65,6 +66,19 @@ export class ArtifactController {
             input,
         );
         APIResponse.Ok(res, artifact);
+    };
+
+    /** POST `/:artifactId/regenerate` — re-runs generation in place and queues it (202). */
+    static regenerate = async (req: Request, res: Response) => {
+        const { workspaceId, artifactId } = artifactIdParamSchema.parse(req.params);
+        const input = regenerateArtifactSchema.parse(req.body ?? {});
+        const artifact = await ArtifactService.regenerate(
+            workspaceId,
+            artifactId,
+            req.session.user.id,
+            input,
+        );
+        APIResponse.Accepted(res, artifact);
     };
 
     /** DELETE `/:artifactId` — deletes an artifact (204). */
