@@ -144,6 +144,7 @@ erDiagram
         String content
         Int tokenCount "nullable"
         Json metadata "nullable, e.g. page"
+        Boolean excluded "default false, skipped by retrieval"
         DateTime createdAt
     }
     conversation {
@@ -243,16 +244,19 @@ One piece (~1000 characters) of a source's text. The same chunk is stored twice:
 - here in Postgres (text, order, token count), and
 - in Pinecone as an embedding vector **whose id is this row's `id`**.
 
-| Column       | Type     | Notes                                                          |
-| ------------ | -------- | -------------------------------------------------------------- |
-| `sourceId`   | `String` | FK → `source.id`, cascade delete                               |
-| `index`      | `Int`    | 0-based position within the source; unique per source          |
-| `content`    | `String` | Chunk text                                                     |
-| `tokenCount` | `Int?`   | Measured with the `cl100k_base` tokenizer (for reference only) |
-| `metadata`   | `Json?`  | `{ "page": 3 }` for PDF chunks                                 |
+| Column       | Type      | Notes                                                                                                                                                                                                    |
+| ------------ | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sourceId`   | `String`  | FK → `source.id`, cascade delete                                                                                                                                                                         |
+| `index`      | `Int`     | 0-based position within the source; unique per source                                                                                                                                                    |
+| `content`    | `String`  | Chunk text                                                                                                                                                                                               |
+| `tokenCount` | `Int?`    | Measured with the `cl100k_base` tokenizer (for reference only)                                                                                                                                           |
+| `metadata`   | `Json?`   | `{ "page": 3 }` for PDF chunks                                                                                                                                                                           |
+| `excluded`   | `Boolean` | Default `false`. When `true` the chunk is skipped by chat retrieval and artifact generation; its vector stays in Pinecone with `excluded: true` in its metadata. Toggled by `PATCH .../chunks/:chunkId`. |
 
 Chunks are **replaced**, not updated: every processing run deletes the old chunks and inserts
-new ones (new ids), then replaces the Pinecone vectors to match.
+new ones (new ids), then replaces the Pinecone vectors to match. That is also how a content edit
+works: editing a TEXT/MARKDOWN source's text deletes its chunks and vectors and re-ingests it, so old
+and new text never coexist. Because the chunks are new, `excluded` flags reset to `false`.
 
 ### `conversation`
 
@@ -281,15 +285,15 @@ One chat turn.
 
 AI-generated study material.
 
-| Column      | Type             | Notes                                                                      |
-| ----------- | ---------------- | -------------------------------------------------------------------------- |
-| `type`      | `ArtifactType`   | `SUMMARY`, `TAKEAWAYS`, `FLASHCARDS`, `QUIZ`, `MINDMAP`, `REPORT`, `WIKI`  |
-| `title`     | `String`         | Given by the client, or e.g. `Quiz · 10/20/2026`                           |
-| `content`   | `Json?`          | Generated output; shape depends on `type` (see [§7](#7-json-columns))      |
-| `sourceIds` | `String[]`       | Postgres text array of the sources used. **Not a foreign key** (see below) |
-| `status`    | `ArtifactStatus` | Generation lifecycle                                                       |
-| `metadata`  | `Json?`          | `generatedAt`, or `processingError` on failure                             |
-| `viewedAt`  | `DateTime?`      | First time the user opened it; `null` = new (drives the unseen count)      |
+| Column      | Type             | Notes                                                                                       |
+| ----------- | ---------------- | ------------------------------------------------------------------------------------------- |
+| `type`      | `ArtifactType`   | `SUMMARY`, `TAKEAWAYS`, `FLASHCARDS`, `QUIZ`, `MINDMAP`, `REPORT`, `WIKI`                   |
+| `title`     | `String`         | Given by the client, or e.g. `Quiz · 10/20/2026`                                            |
+| `content`   | `Json?`          | Generated output; shape depends on `type` (see [§7](#7-json-columns))                       |
+| `sourceIds` | `String[]`       | Postgres text array of the sources used. **Not a foreign key** (see below)                  |
+| `status`    | `ArtifactStatus` | Generation lifecycle                                                                        |
+| `metadata`  | `Json?`          | `generatedAt`, `processingError` on failure, `userEdited` / `editedAt` after a content edit |
+| `viewedAt`  | `DateTime?`      | First time the user opened it; `null` = new (drives the unseen count)                       |
 
 **Why `sourceIds` is not a relation:** an artifact is a snapshot. If a source is deleted later,
 the artifact should still exist and still show what it was generated from. A join table with a
@@ -391,7 +395,7 @@ stateDiagram-v2
     PROCESSING --> READY: chunks embedded and indexed
     PROCESSING --> FAILED: step failed after retries
     FAILED --> PENDING: reprocess
-    READY --> PENDING: reprocess
+    READY --> PENDING: reprocess / text content edited
     READY --> [*]: deleted
 ```
 
@@ -412,6 +416,8 @@ stateDiagram-v2
     PENDING --> PROCESSING: Inngest job starts
     PROCESSING --> READY: content generated
     PROCESSING --> FAILED: generation error
+    READY --> PENDING: regenerate
+    FAILED --> PENDING: regenerate
 ```
 
 <details>
@@ -497,6 +503,8 @@ Only sources the answer actually cites (`[1]`, `[W2]`, ...) are stored:
 
 `{ "generatedAt": "<ISO date>" }` when READY, or `{ "processingError": "..." }` when FAILED. An artifact
 built from a conversation also has `conversationId` (and `messageIds` when a subset was chosen).
+After a user edits the content: `{ "userEdited": true, "editedAt": "<ISO date>" }`. A successful
+regenerate clears both; a failed one keeps them, because the edited content is still what is stored.
 
 ---
 
