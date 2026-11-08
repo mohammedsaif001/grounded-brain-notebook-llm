@@ -6,12 +6,20 @@ import {
     condenseSourcePrompt,
     condenseSourceSystem,
 } from "../../config/prompts.js";
-import { z } from "zod";
+import { type z } from "zod";
 import {
     ARTIFACT_CONDENSE_SEGMENT_CHARS,
     ARTIFACT_MAX_CONTEXT_CHARS,
     CHAT_MODEL,
 } from "../../config/ai.config.js";
+import {
+    flashcardsSchema,
+    mindmapSchema,
+    quizSchema,
+    reportSchema,
+    takeawaysSchema,
+    wikiSchema,
+} from "./artifact-content.schema.js";
 import { GithubRepoClient } from "../source/ingestion/github.js";
 import { MessageRepository } from "../conversation/message.repository.js";
 import { SourceService } from "../source/source.service.js";
@@ -35,96 +43,6 @@ export type ArtifactCitation = {
     /** The source's title. */
     label: string;
 };
-
-/** Source numbers the model reports for an item; turned into {@link ArtifactCitation}s afterwards. */
-const sourceNumbers = z.array(z.number().int());
-
-/** Model output for FLASHCARDS: 3-30 front/back cards. */
-const flashcardsSchema = z.object({
-    cards: z
-        .array(
-            z.object({
-                front: z.string(),
-                back: z.string(),
-                sources: sourceNumbers,
-            }),
-        )
-        .min(3)
-        .max(30),
-});
-
-/** Model output for QUIZ: 3-15 multiple-choice questions; `correctIndex` is 0-based into `options`. */
-const quizSchema = z.object({
-    questions: z
-        .array(
-            z.object({
-                question: z.string(),
-                options: z.array(z.string()).min(2).max(5),
-                correctIndex: z.number().int().min(0),
-                explanation: z.string(),
-                sources: sourceNumbers,
-            }),
-        )
-        .min(3)
-        .max(15),
-});
-
-/** Model output for MINDMAP: 2-40 labelled nodes plus edges referencing node ids. */
-const mindmapSchema = z.object({
-    nodes: z
-        .array(
-            z.object({
-                id: z.string(),
-                label: z.string(),
-            }),
-        )
-        .min(2)
-        .max(40),
-    edges: z.array(
-        z.object({
-            id: z.string(),
-            source: z.string(),
-            target: z.string(),
-        }),
-    ),
-});
-
-/** Model output for TAKEAWAYS: 3-20 short bullet strings. */
-const takeawaysSchema = z.object({
-    items: z.array(z.string()).min(3).max(20),
-});
-
-/** Model output for REPORT: the full markdown plus the same content split into titled sections. */
-const reportSchema = z.object({
-    markdown: z.string(),
-    sections: z.array(
-        z.object({
-            title: z.string(),
-            content: z.string(),
-            sources: sourceNumbers,
-        }),
-    ),
-});
-
-/** Model output for WIKI: a repository overview, architecture, diagram and per-module guide. */
-const wikiSchema = z.object({
-    overview: z.string(),
-    techStack: z.array(z.object({ name: z.string(), purpose: z.string() })).max(25),
-    architecture: z.string(),
-    diagram: z.string(),
-    modules: z
-        .array(
-            z.object({
-                name: z.string(),
-                path: z.string(),
-                description: z.string(),
-                keyFiles: z.array(z.string()).max(10),
-            }),
-        )
-        .min(1)
-        .max(30),
-    gettingStarted: z.string(),
-});
 
 /**
  * Splits a total character budget across sources fairly.
