@@ -298,6 +298,29 @@ function readChatStream(text: string) {
     return reply;
 }
 
+/**
+ * Asks one question in a fresh conversation and returns the reply with the citations it saved.
+ *
+ * @param client - Signed-in client that owns the workspace
+ * @param workspaceId - Workspace to chat in
+ * @param question - The user's question
+ * @returns The reply text and the citations stored on the assistant message
+ */
+async function askChat(client: Client, workspaceId: string, question: string) {
+    const base = `/api/workspaces/${workspaceId}`;
+    const res = await client.post(`${base}/chat`, { messages: [userMessage(question)] });
+    expectStatus(res, 200);
+    const conversationId = res.headers.get("x-conversation-id") ?? "";
+    const reply = readChatStream(res.text);
+
+    const messages = (await client.get(`${base}/conversations/${conversationId}/messages`)).body
+        ?.data as any[];
+    const citations = messages
+        .filter((m) => m.role === "ASSISTANT")
+        .flatMap((m) => (m.citations as any[]) ?? []);
+    return { reply, citations };
+}
+
 /** Builds a `useChat`-style user message with a single text part. */
 const userMessage = (text: string) => ({
     id: crypto.randomUUID(),
@@ -364,6 +387,14 @@ Cellular respiration converts glucose into ATP.
 - **Glycolysis** happens in the cytoplasm.
 - The **Krebs cycle** happens in the mitochondrial matrix.
 - The **electron transport chain** produces most of the ATP.`;
+
+/** Fact used to prove that editing a source replaces what was indexed instead of adding to it. */
+const ATLANTIS_V1 = `The capital of Atlantis is Poseidonia.
+Poseidonia sits on a ring of canals at the centre of the island.`;
+
+/** Same fact, changed. After an edit only this version may be retrievable. */
+const ATLANTIS_V2 = `The capital of Atlantis is Meridia.
+Meridia sits on a ring of canals at the centre of the island.`;
 
 // ---------------------------------------------------------------------------
 // Flow
@@ -744,6 +775,273 @@ async function main() {
         );
         expectStatus(await a.delete(path), 204);
     });
+
+    begin("Source editing and chunk exclusion");
+    /** Path under the dedicated workspace for the edit tests (keeps their facts out of other tests). */
+    const ew = (path = "") => `/api/workspaces/${state.editWorkspaceId}${path}`;
+    await step("create a workspace and a source to edit", async () => {
+        const workspace = await a.post("/api/workspaces", { title: "Smoke source editing" });
+        expectStatus(workspace, 201);
+        state.editWorkspaceId = workspace.body?.data?.id;
+
+        const source = await a.post(ew("/sources"), {
+            type: "TEXT",
+            title: "Atlantis facts",
+            content: ATLANTIS_V1,
+        });
+        expectStatus(source, 201);
+        state.editSourceId = source.body?.data?.id;
+    });
+    await step("PATCH source validation", async () => {
+        const path = ew(`/sources/${state.editSourceId}`);
+        expectStatus(await a.patch(path, {}), 400);
+        expectStatus(await a.patch(path, { title: "" }), 400);
+        expectStatus(await a.patch(path, { title: "x".repeat(201) }), 400);
+        expectStatus(await a.patch(path, { content: "" }), 400);
+        expectStatus(await a.patch(path, { title: "ok", type: "PDF" }), 400);
+        expectStatus(await a.patch(path, { title: "ok", expectedUpdatedAt: "yesterday" }), 400);
+        expectStatus(await a.patch(ew("/sources/no-such-source"), { title: "x" }), 404);
+    });
+    await step("user B cannot edit user A's source (404)", async () => {
+        expectStatus(await b.patch(ew(`/sources/${state.editSourceId}`), { title: "hijack" }), 404);
+    });
+    await step("content of a non-text source is rejected (400)", async () => {
+        const website = await a.post(ew("/sources/import/web-search"), {
+            title: "Saved page",
+            content: "Some saved page text.",
+            url: "https://example.com/page",
+        });
+        expectStatus(website, 201);
+        const path = ew(`/sources/${website.body?.data?.id}`);
+        const res = await a.patch(path, { content: "Replacement text" });
+        expectStatus(res, 400);
+        expect(/text and markdown/i.test(res.body?.error?.message ?? ""), "unclear message");
+        state.websiteSourceId = website.body?.data?.id;
+    });
+    await step("a source that is still processing cannot be edited (409)", async () => {
+        const fresh = await a.post(ew("/sources"), {
+            type: "TEXT",
+            title: "Busy",
+            content: "Busy source text that is being indexed right now.",
+        });
+        expectStatus(fresh, 201);
+        const res = await a.patch(ew(`/sources/${fresh.body?.data?.id}`), { title: "Renamed" });
+        if (res.status === 200) throw new Skip("source finished indexing before the request");
+        expectStatus(res, 409);
+        state.busySourceId = fresh.body?.data?.id;
+    });
+
+    if (AI) {
+        await step("source is indexed and answers from the original text", async () => {
+            await waitForSource(a, state.editWorkspaceId, state.editSourceId);
+            const { reply } = await askChat(
+                a,
+                state.editWorkspaceId,
+                "What is the capital of Atlantis?",
+            );
+            expect(/Poseidonia/i.test(reply), `reply: ${reply.slice(0, 120)}`);
+        });
+        await step(
+            "title edit updates the title and the chat citations, without re-indexing",
+            async () => {
+                const before = (await a.get(ew(`/sources/${state.editSourceId}`))).body?.data;
+                const res = await a.patch(ew(`/sources/${state.editSourceId}`), {
+                    title: "  Atlantis atlas  ",
+                    expectedUpdatedAt: before.updatedAt,
+                });
+                expectStatus(res, 200);
+                const after = res.body?.data;
+                expect(after.title === "Atlantis atlas", "title not trimmed and saved");
+                expect(
+                    after.status === "READY",
+                    `status ${after.status}: a title edit must not re-index`,
+                );
+                expect(after.content === before.content, "content changed");
+                expect(
+                    after.metadata?.indexedAt === before.metadata?.indexedAt,
+                    "source was re-indexed",
+                );
+                expect(after.updatedAt !== before.updatedAt, "updatedAt not bumped");
+
+                const { citations } = await askChat(
+                    a,
+                    state.editWorkspaceId,
+                    "What is the capital of Atlantis?",
+                );
+                const cited = citations.filter((c) => c.sourceId === state.editSourceId);
+                expect(cited.length > 0, "source not cited");
+                expect(
+                    cited.every((c) => c.sourceTitle === "Atlantis atlas"),
+                    `citations still show ${cited[0]?.sourceTitle}`,
+                );
+            },
+        );
+        await step("a stale expectedUpdatedAt is rejected with 409 CONFLICT", async () => {
+            const res = await a.patch(ew(`/sources/${state.editSourceId}`), {
+                title: "Stale write",
+                expectedUpdatedAt: "2020-01-01T00:00:00.000Z",
+            });
+            expectStatus(res, 409);
+            expect(res.body?.error?.code === "CONFLICT", `code ${res.body?.error?.code}`);
+            expect(
+                res.body?.error?.message ===
+                    "This item was changed elsewhere. Reload and try again.",
+                "wrong message",
+            );
+            const current = (await a.get(ew(`/sources/${state.editSourceId}`))).body?.data;
+            expect(current.title === "Atlantis atlas", "a rejected write changed the title");
+        });
+        await step(
+            "concurrent edits from one version: exactly one wins (compare-and-set)",
+            async () => {
+                const current = (await a.get(ew(`/sources/${state.editSourceId}`))).body?.data;
+                const path = ew(`/sources/${state.editSourceId}`);
+                const [one, two] = await Promise.all([
+                    a.patch(path, { title: "Race one", expectedUpdatedAt: current.updatedAt }),
+                    a.patch(path, { title: "Race two", expectedUpdatedAt: current.updatedAt }),
+                ]);
+                const statuses = [one.status, two.status].sort();
+                expect(
+                    statuses[0] === 200 && statuses[1] === 409,
+                    `statuses ${statuses.join(", ")}`,
+                );
+                await a.patch(path, { title: "Atlantis atlas" });
+            },
+        );
+        await step(
+            "content edit replaces the old text: nothing of it is left to retrieve",
+            async () => {
+                const path = ew(`/sources/${state.editSourceId}`);
+                const res = await a.patch(path, { content: ATLANTIS_V2 });
+                expectStatus(res, 200);
+                expect(res.body?.data?.status === "PENDING", `status ${res.body?.data?.status}`);
+                expect(res.body?.data?.content === ATLANTIS_V2, "content not saved");
+
+                // Queued or running: a second edit has to wait.
+                expectStatus(await a.patch(path, { title: "Too soon" }), 409);
+
+                await sleep(1_000);
+                const ready = await waitForSource(a, state.editWorkspaceId, state.editSourceId);
+                expect(ready.title === "Atlantis atlas", "title lost");
+
+                const { chunks } = (await a.get(ew(`/sources/${state.editSourceId}/chunks`))).body
+                    ?.data as {
+                    chunks: any[];
+                };
+                expect(chunks.length > 0, "no chunks after re-index");
+                expect(
+                    !chunks.some((c) => /Poseidonia/i.test(c.content)),
+                    "old text still in a chunk",
+                );
+                expect(
+                    chunks.some((c) => /Meridia/i.test(c.content)),
+                    "new text not chunked",
+                );
+
+                const { reply } = await askChat(
+                    a,
+                    state.editWorkspaceId,
+                    "What is the capital of Atlantis?",
+                );
+                expect(/Meridia/i.test(reply), `reply: ${reply.slice(0, 120)}`);
+                expect(!/Poseidonia/i.test(reply), "answer still mentions the old capital");
+            },
+        );
+        await step("sending identical content does not re-index", async () => {
+            const before = (await a.get(ew(`/sources/${state.editSourceId}`))).body?.data;
+            const res = await a.patch(ew(`/sources/${before.id}`), { content: before.content });
+            expectStatus(res, 200);
+            expect(res.body?.data?.status === "READY", "identical content re-queued the source");
+            expect(
+                res.body?.data?.updatedAt === before.updatedAt,
+                "a no-op edit changed updatedAt",
+            );
+        });
+
+        await step(
+            "GET chunks includes excluded, PATCH chunk validation and ownership",
+            async () => {
+                const { chunks } = (await a.get(ew(`/sources/${state.editSourceId}/chunks`))).body
+                    ?.data as {
+                    chunks: any[];
+                };
+                expect(
+                    chunks.every((c) => c.excluded === false),
+                    "excluded missing or true by default",
+                );
+                state.chunkId = chunks[0].id;
+
+                const path = ew(`/sources/${state.editSourceId}/chunks/${state.chunkId}`);
+                expectStatus(await a.patch(path, {}), 400);
+                expectStatus(await a.patch(path, { excluded: "yes" }), 400);
+                expectStatus(await a.patch(path, { excluded: true, extra: 1 }), 400);
+                expectStatus(
+                    await a.patch(ew(`/sources/${state.editSourceId}/chunks/no-such-chunk`), {
+                        excluded: true,
+                    }),
+                    404,
+                );
+                expectStatus(
+                    await a.patch(ew(`/sources/no-such-source/chunks/${state.chunkId}`), {
+                        excluded: true,
+                    }),
+                    404,
+                );
+                expectStatus(await b.patch(path, { excluded: true }), 404);
+                // A chunk id from another source is not found under this one.
+                expectStatus(
+                    await a.patch(
+                        `/api/workspaces/${state.workspaceId}/sources/${state.textSourceId}/chunks/${state.chunkId}`,
+                        { excluded: true },
+                    ),
+                    404,
+                );
+            },
+        );
+        await step(
+            "an excluded chunk is skipped by retrieval; re-including brings it back",
+            async () => {
+                const path = ew(`/sources/${state.editSourceId}/chunks/${state.chunkId}`);
+                const excluded = await a.patch(path, { excluded: true });
+                expectStatus(excluded, 200);
+                expect(excluded.body?.data?.excluded === true, "chunk not excluded");
+
+                const listed = (await a.get(ew(`/sources/${state.editSourceId}/chunks`))).body
+                    ?.data as {
+                    chunks: any[];
+                };
+                expect(
+                    listed.chunks.find((c) => c.id === state.chunkId)?.excluded === true,
+                    "flag not listed",
+                );
+
+                // Pinecone is eventually consistent; give the metadata update a moment.
+                await sleep(6_000);
+                const hidden = await askChat(
+                    a,
+                    state.editWorkspaceId,
+                    "What is the capital of Atlantis?",
+                );
+                expect(
+                    !hidden.citations.some((c) => c.chunkId === state.chunkId),
+                    "excluded chunk was still cited",
+                );
+                expect(!/Meridia/i.test(hidden.reply), "excluded text still reached the answer");
+
+                expectStatus(await a.patch(path, { excluded: false }), 200);
+                await sleep(6_000);
+                const back = await askChat(
+                    a,
+                    state.editWorkspaceId,
+                    "What is the capital of Atlantis?",
+                );
+                expect(
+                    back.citations.some((c) => c.chunkId === state.chunkId),
+                    "re-included chunk not retrievable",
+                );
+            },
+        );
+    }
 
     begin("Memory");
     await step("create memory", async () => {
@@ -1145,7 +1443,9 @@ async function main() {
     });
     await step("delete workspaces", async () => {
         if (KEEP) throw new Skip(`--keep (workspace ${state.workspaceId})`);
-        for (const id of [state.workspaceId, state.emptyWorkspaceId].filter(Boolean)) {
+        for (const id of [state.workspaceId, state.emptyWorkspaceId, state.editWorkspaceId].filter(
+            Boolean,
+        )) {
             expectStatus(await a.delete(`/api/workspaces/${id}`), 204);
             expectStatus(await a.get(`/api/workspaces/${id}`), 404);
         }
