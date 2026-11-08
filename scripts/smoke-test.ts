@@ -321,6 +321,32 @@ async function askChat(client: Client, workspaceId: string, question: string) {
     return { reply, citations };
 }
 
+/** Question about the Atlantis fact; asks for a citation because the model may otherwise omit one. */
+const ATLANTIS_QUESTION = "What is the capital of Atlantis? Cite the source marker in your answer.";
+
+/**
+ * Like {@link askChat}, retrying (up to 3 times) until `wanted` accepts the citations, because the
+ * model does not always cite on the first try. Use only where a citation is the expected outcome.
+ *
+ * @param client - Signed-in client that owns the workspace
+ * @param workspaceId - Workspace to chat in
+ * @param question - The user's question
+ * @param wanted - Returns `true` once the citations are what the test expects
+ * @returns The last reply and its citations
+ */
+async function askUntilCited(
+    client: Client,
+    workspaceId: string,
+    question: string,
+    wanted: (citations: any[]) => boolean,
+) {
+    let answer = await askChat(client, workspaceId, question);
+    for (let attempt = 1; attempt < 3 && !wanted(answer.citations); attempt += 1) {
+        answer = await askChat(client, workspaceId, question);
+    }
+    return answer;
+}
+
 /** Builds a `useChat`-style user message with a single text part. */
 const userMessage = (text: string) => ({
     id: crypto.randomUUID(),
@@ -863,10 +889,11 @@ async function main() {
                 );
                 expect(after.updatedAt !== before.updatedAt, "updatedAt not bumped");
 
-                const { citations } = await askChat(
+                const { citations } = await askUntilCited(
                     a,
                     state.editWorkspaceId,
-                    "What is the capital of Atlantis?",
+                    ATLANTIS_QUESTION,
+                    (found) => found.some((c) => c.sourceId === state.editSourceId),
                 );
                 const cited = citations.filter((c) => c.sourceId === state.editSourceId);
                 expect(cited.length > 0, "source not cited");
@@ -1030,10 +1057,11 @@ async function main() {
 
                 expectStatus(await a.patch(path, { excluded: false }), 200);
                 await sleep(6_000);
-                const back = await askChat(
+                const back = await askUntilCited(
                     a,
                     state.editWorkspaceId,
-                    "What is the capital of Atlantis?",
+                    ATLANTIS_QUESTION,
+                    (found) => found.some((c) => c.chunkId === state.chunkId),
                 );
                 expect(
                     back.citations.some((c) => c.chunkId === state.chunkId),
