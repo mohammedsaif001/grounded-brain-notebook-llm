@@ -135,13 +135,38 @@ export class SourceService {
     }
 
     /**
-     * Lists READY sources including their full text. Internal use only (no ownership check);
+     * Lists READY sources including their text. Internal use only (no ownership check);
      * called from background jobs and after the caller has verified the workspace.
+     *
+     * For a source with excluded chunks the text is rebuilt from the chunks that remain, so
+     * excluded passages never reach artifact generation.
      *
      * @param workspaceId - Workspace to list from
      */
-    static listReadyWithContent(workspaceId: string) {
-        return SourceRepository.findAllWithContentByWorkspaceId(workspaceId, { status: "READY" });
+    static async listReadyWithContent(workspaceId: string) {
+        const sources = await SourceRepository.findAllWithContentByWorkspaceId(workspaceId, {
+            status: "READY",
+        });
+
+        const withExcluded = new Set(
+            await SourceChunkRepository.findSourceIdsWithExcluded(
+                sources.map((source) => source.id),
+            ),
+        );
+        if (withExcluded.size === 0) {
+            return sources;
+        }
+
+        return Promise.all(
+            sources.map(async (source) => {
+                if (!withExcluded.has(source.id)) {
+                    return source;
+                }
+
+                const included = await SourceChunkRepository.findIncludedBySourceId(source.id);
+                return { ...source, content: included.map((chunk) => chunk.content).join("\n\n") };
+            }),
+        );
     }
 
     /**
