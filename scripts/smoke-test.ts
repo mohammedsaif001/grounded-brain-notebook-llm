@@ -1114,6 +1114,52 @@ async function main() {
     await step("WIKI without a GitHub source is 400", async () => {
         expectStatus(await a.post(ws("/artifacts"), { type: "WIKI" }), 400);
     });
+    await step("PATCH and regenerate on an unknown artifact are 404", async () => {
+        expectStatus(await a.patch(ws("/artifacts/no-such-artifact"), { title: "x" }), 404);
+        expectStatus(await a.post(ws("/artifacts/no-such-artifact/regenerate"), {}), 404);
+    });
+    await step("PATCH artifact body validation", async () => {
+        const path = ws("/artifacts/no-such-artifact");
+        expectStatus(await a.patch(path, {}), 400);
+        expectStatus(await a.patch(path, { title: "" }), 400);
+        expectStatus(await a.patch(path, { title: "x".repeat(201) }), 400);
+        expectStatus(await a.patch(path, { content: "not an object" }), 400);
+        expectStatus(await a.patch(path, { type: "QUIZ", title: "x" }), 400);
+        expectStatus(await a.patch(path, { title: "x", expectedUpdatedAt: "soon" }), 400);
+        expectStatus(
+            await a.post(ws("/artifacts/no-such-artifact/regenerate"), { force: "yes" }),
+            400,
+        );
+        expectStatus(await a.post(ws("/artifacts/no-such-artifact/regenerate"), { bogus: 1 }), 400);
+    });
+    await step("bulk delete artifacts: validation, ownership and unknown ids", async () => {
+        const path = ws("/artifacts/bulk-delete");
+        expectStatus(await a.post(path, {}), 400);
+        expectStatus(await a.post(path, { artifactIds: [] }), 400);
+        expectStatus(
+            await a.post(path, { artifactIds: Array.from({ length: 101 }, (_, i) => `id-${i}`) }),
+            400,
+        );
+        expectStatus(await a.post(path, { artifactIds: ["x"], extra: true }), 400);
+        expectStatus(await b.post(path, { artifactIds: ["x"] }), 404);
+
+        const res = await a.post(path, { artifactIds: ["no-such-artifact", "no-such-artifact"] });
+        expectStatus(res, 200);
+        const { deleted, results } = res.body?.data as { deleted: number; results: any[] };
+        expect(deleted === 0, `deleted ${deleted}`);
+        expect(
+            results.length === 1 && results[0].status === "not_found",
+            "unknown id not reported",
+        );
+    });
+    await step("artifact list ?q matches nothing when there are no artifacts", async () => {
+        const res = await a.get(`/api/workspaces/${state.emptyWorkspaceId}/artifacts?q=anything`);
+        expectStatus(res, 200);
+        expect((res.body?.data as any[]).length === 0, "unexpected artifacts");
+        expect(res.body?.meta?.total === 0, "meta.total");
+        expect(res.body?.meta?.nextCursor === null, "meta.nextCursor");
+    });
+
     if (AI) {
         for (const type of ["SUMMARY", "QUIZ"] as const) {
             await step(`generate ${type} to READY`, async () => {
@@ -1249,6 +1295,367 @@ async function main() {
                 );
             });
         }
+        await step(
+            "generated artifacts get a topic title instead of the date default",
+            async () => {
+                for (const type of ["SUMMARY", "QUIZ"] as const) {
+                    const artifact = (await a.get(ws(`/artifacts/${state[`artifact${type}`]}`)))
+                        .body?.data;
+                    expect(
+                        !artifact.title.includes("\u00b7"),
+                        `still default: "${artifact.title}"`,
+                    );
+                    expect(
+                        artifact.title.length >= 2 && artifact.title.length <= 80,
+                        "odd title length",
+                    );
+                }
+            },
+        );
+        await step("a custom title is kept at creation", async () => {
+            const created = await a.post(ws("/artifacts"), {
+                type: "TAKEAWAYS",
+                title: "My takeaways",
+            });
+            expectStatus(created, 201);
+            const done = await poll(
+                async () => (await a.get(ws(`/artifacts/${created.body?.data?.id}`))).body?.data,
+                (x) => x?.status === "READY" || x?.status === "FAILED",
+                ARTIFACT_TIMEOUT_MS,
+                INNGEST_HINT,
+            );
+            expect(done.status === "READY", `ended ${done.status}`);
+            expect(done.title === "My takeaways", `title became "${done.title}"`);
+        });
+        await step("generate MINDMAP to READY", async () => {
+            const created = await a.post(ws("/artifacts"), { type: "MINDMAP" });
+            expectStatus(created, 201);
+            const id = created.body?.data?.id as string;
+            const artifact = await poll(
+                async () => (await a.get(ws(`/artifacts/${id}`))).body?.data,
+                (x) => x?.status === "READY" || x?.status === "FAILED",
+                ARTIFACT_TIMEOUT_MS,
+                INNGEST_HINT,
+            );
+            expect(artifact.status === "READY", `artifact ended ${artifact.status}`);
+            state.artifactMINDMAP = id;
+        });
+
+        begin("Artifact editing and regeneration");
+        await step("user B cannot edit or regenerate user A's artifact (404)", async () => {
+            expectStatus(
+                await b.patch(ws(`/artifacts/${state.artifactQUIZ}`), { title: "x" }),
+                404,
+            );
+            expectStatus(await b.post(ws(`/artifacts/${state.artifactQUIZ}/regenerate`), {}), 404);
+        });
+        await step("title edit renames without marking the content edited", async () => {
+            const before = (await a.get(ws(`/artifacts/${state.artifactSUMMARY}`))).body?.data;
+            const res = await a.patch(ws(`/artifacts/${state.artifactSUMMARY}`), {
+                title: "  Renamed summary  ",
+                expectedUpdatedAt: before.updatedAt,
+            });
+            expectStatus(res, 200);
+            expect(res.body?.data?.title === "Renamed summary", "title not trimmed and saved");
+            expect(res.body?.data?.type === "SUMMARY", "type changed");
+            expect(
+                JSON.stringify(res.body?.data?.content) === JSON.stringify(before.content),
+                "content changed",
+            );
+            expect(
+                !res.body?.data?.metadata?.userEdited,
+                "a rename must not mark the content edited",
+            );
+            expect(res.body?.data?.updatedAt !== before.updatedAt, "updatedAt not bumped");
+        });
+        await step(
+            "content is validated against the artifact's own type, with field details",
+            async () => {
+                const quiz = (await a.get(ws(`/artifacts/${state.artifactQUIZ}`))).body?.data;
+                const path = ws(`/artifacts/${state.artifactQUIZ}`);
+
+                const outOfRange = structuredClone(quiz.content);
+                outOfRange.questions[0].correctIndex = outOfRange.questions[0].options.length;
+                const res = await a.patch(path, { content: outOfRange });
+                expectStatus(res, 400);
+                expect(
+                    res.body?.error?.code === "VALIDATION_ERROR",
+                    `code ${res.body?.error?.code}`,
+                );
+                expect(
+                    Object.keys(res.body?.error?.details ?? {}).includes(
+                        "content.questions.0.correctIndex",
+                    ),
+                    `details ${JSON.stringify(res.body?.error?.details)}`,
+                );
+
+                // Another type's shape, an unknown key and a too-short list are all refused.
+                expectStatus(await a.patch(path, { content: { cards: [] } }), 400);
+                expectStatus(
+                    await a.patch(path, { content: { ...quiz.content, extra: true } }),
+                    400,
+                );
+                expectStatus(
+                    await a.patch(path, {
+                        content: { questions: quiz.content.questions.slice(0, 1) },
+                    }),
+                    400,
+                );
+                expectStatus(
+                    await a.patch(ws(`/artifacts/${state.artifactSUMMARY}`), {
+                        content: { markdown: 5 },
+                    }),
+                    400,
+                );
+
+                const unchanged = (await a.get(path)).body?.data;
+                expect(
+                    JSON.stringify(unchanged.content) === JSON.stringify(quiz.content),
+                    "a rejected edit changed the content",
+                );
+            },
+        );
+        await step(
+            "valid content edit is saved, citations kept as sent, marked userEdited",
+            async () => {
+                const before = (await a.get(ws(`/artifacts/${state.artifactQUIZ}`))).body?.data;
+                const content = structuredClone(before.content);
+                content.questions[0].question = "Edited by the user: which statement is correct?";
+
+                const res = await a.patch(ws(`/artifacts/${state.artifactQUIZ}`), {
+                    content,
+                    expectedUpdatedAt: before.updatedAt,
+                });
+                expectStatus(res, 200);
+                const after = res.body?.data;
+                expect(
+                    after.content.questions[0].question === content.questions[0].question,
+                    "edit not saved",
+                );
+                expect(
+                    JSON.stringify(after.content.questions[0].citations) ===
+                        JSON.stringify(before.content.questions[0].citations),
+                    "citations were not preserved",
+                );
+                expect(after.metadata?.userEdited === true, "userEdited not set");
+                expect(typeof after.metadata?.editedAt === "string", "editedAt not set");
+                expect(after.status === "READY" && after.type === "QUIZ", "status or type changed");
+                expect(after.updatedAt !== before.updatedAt, "updatedAt not bumped");
+            },
+        );
+        await step("a stale expectedUpdatedAt is rejected with 409 CONFLICT", async () => {
+            const res = await a.patch(ws(`/artifacts/${state.artifactQUIZ}`), {
+                title: "Stale",
+                expectedUpdatedAt: "2020-01-01T00:00:00.000Z",
+            });
+            expectStatus(res, 409);
+            expect(res.body?.error?.code === "CONFLICT", `code ${res.body?.error?.code}`);
+            expect(
+                res.body?.error?.message ===
+                    "This item was changed elsewhere. Reload and try again.",
+                "wrong message",
+            );
+        });
+        await step(
+            "concurrent edits from one version: exactly one wins (compare-and-set)",
+            async () => {
+                const current = (await a.get(ws(`/artifacts/${state.artifactSUMMARY}`))).body?.data;
+                const path = ws(`/artifacts/${state.artifactSUMMARY}`);
+                const [one, two] = await Promise.all([
+                    a.patch(path, { title: "Race one", expectedUpdatedAt: current.updatedAt }),
+                    a.patch(path, { title: "Race two", expectedUpdatedAt: current.updatedAt }),
+                ]);
+                const statuses = [one.status, two.status].sort();
+                expect(
+                    statuses[0] === 200 && statuses[1] === 409,
+                    `statuses ${statuses.join(", ")}`,
+                );
+                await a.patch(path, { title: "Renamed summary" });
+            },
+        );
+        await step(
+            "MINDMAP edits must keep node ids unique and edges pointing at nodes",
+            async () => {
+                const path = ws(`/artifacts/${state.artifactMINDMAP}`);
+                const mindmap = (await a.get(path)).body?.data;
+                const { nodes, edges } = mindmap.content as { nodes: any[]; edges: any[] };
+
+                const dangling = await a.patch(path, {
+                    content: {
+                        nodes,
+                        edges: [...edges, { id: "e-bad", source: nodes[0].id, target: "ghost" }],
+                    },
+                });
+                expectStatus(dangling, 400);
+                expect(
+                    Object.keys(dangling.body?.error?.details ?? {}).some((k) =>
+                        k.startsWith("content.edges."),
+                    ),
+                    `details ${JSON.stringify(dangling.body?.error?.details)}`,
+                );
+                expectStatus(
+                    await a.patch(path, { content: { nodes: [...nodes, nodes[0]], edges } }),
+                    400,
+                );
+                expectStatus(
+                    await a.patch(path, {
+                        content: {
+                            nodes,
+                            edges: [...edges, edges[0] ?? { id: "e1", source: "a", target: "b" }],
+                        },
+                    }),
+                    400,
+                );
+
+                const renamed = nodes.map((n, i) => (i === 0 ? { ...n, label: "Edited root" } : n));
+                const ok = await a.patch(path, { content: { nodes: renamed, edges } });
+                expectStatus(ok, 200);
+                expect(
+                    ok.body?.data?.content?.nodes?.[0]?.label === "Edited root",
+                    "edit not saved",
+                );
+                expect(ok.body?.data?.metadata?.userEdited === true, "userEdited not set");
+            },
+        );
+        await step(
+            "an artifact that is still generating cannot be edited or regenerated (409)",
+            async () => {
+                const created = await a.post(ws("/artifacts"), { type: "TAKEAWAYS" });
+                expectStatus(created, 201);
+                const path = ws(`/artifacts/${created.body?.data?.id}`);
+                expectStatus(await a.patch(path, { title: "Too early" }), 409);
+                expectStatus(await a.post(`${path}/regenerate`, {}), 409);
+                await poll(
+                    async () => (await a.get(path)).body?.data,
+                    (x) => x?.status === "READY" || x?.status === "FAILED",
+                    ARTIFACT_TIMEOUT_MS,
+                    INNGEST_HINT,
+                );
+            },
+        );
+        await step(
+            "regenerating an edited artifact needs force (409 ARTIFACT_EDITED)",
+            async () => {
+                const res = await a.post(ws(`/artifacts/${state.artifactQUIZ}/regenerate`), {});
+                expectStatus(res, 409);
+                expect(
+                    res.body?.error?.code === "ARTIFACT_EDITED",
+                    `code ${res.body?.error?.code}`,
+                );
+                const after = (await a.get(ws(`/artifacts/${state.artifactQUIZ}`))).body?.data;
+                expect(after.status === "READY", "a refused regenerate changed the artifact");
+                expect(
+                    after.content.questions[0].question.startsWith("Edited by the user"),
+                    "a refused regenerate discarded the edit",
+                );
+            },
+        );
+        await step(
+            "regenerate with force: same id and title, 202 PENDING, back to READY, edit flag cleared",
+            async () => {
+                const path = ws(`/artifacts/${state.artifactQUIZ}`);
+                const before = (await a.get(path)).body?.data;
+                const res = await a.post(`${path}/regenerate`, { force: true });
+                expectStatus(res, 202);
+                expect(res.body?.data?.id === state.artifactQUIZ, "id changed");
+                expect(res.body?.data?.status === "PENDING", `status ${res.body?.data?.status}`);
+                expect(res.body?.data?.title === before.title, "title changed");
+
+                const done = await poll(
+                    async () => (await a.get(path)).body?.data,
+                    (x) => x?.status === "READY" || x?.status === "FAILED",
+                    ARTIFACT_TIMEOUT_MS,
+                    INNGEST_HINT,
+                );
+                expect(done.status === "READY", `ended ${done.status}`);
+                expect(
+                    done.id === state.artifactQUIZ && done.title === before.title,
+                    "id or title changed",
+                );
+                expect(!done.metadata?.userEdited, "edit flag survived a regenerate");
+                expect(
+                    !done.content.questions.some((q: any) =>
+                        q.question.startsWith("Edited by the user"),
+                    ),
+                    "edit survived",
+                );
+                expect(done.content.questions.length >= 3, "no questions");
+            },
+        );
+        await step(
+            "regenerate an unedited artifact needs no force and keeps its custom title",
+            async () => {
+                const path = ws(`/artifacts/${state.artifactSUMMARY}`);
+                const res = await a.post(`${path}/regenerate`);
+                expectStatus(res, 202);
+                expect(res.body?.data?.status === "PENDING", `status ${res.body?.data?.status}`);
+                const done = await poll(
+                    async () => (await a.get(path)).body?.data,
+                    (x) => x?.status === "READY" || x?.status === "FAILED",
+                    ARTIFACT_TIMEOUT_MS,
+                    INNGEST_HINT,
+                );
+                expect(done.status === "READY", `ended ${done.status}`);
+                expect(done.title === "Renamed summary", `title became "${done.title}"`);
+                expect(typeof done.content?.markdown === "string", "no markdown");
+            },
+        );
+
+        begin("Artifacts");
+        await step(
+            "artifact list ?q filters by title, case-insensitively, with paging",
+            async () => {
+                const mindmap = (await a.get(ws(`/artifacts/${state.artifactMINDMAP}`))).body?.data;
+                const fragment = (mindmap.title as string).slice(1, 6).toUpperCase();
+
+                const hit = await a.get(ws(`/artifacts?q=${encodeURIComponent(fragment)}`));
+                expectStatus(hit, 200);
+                expect(
+                    (hit.body?.data as any[]).some((x) => x.id === state.artifactMINDMAP),
+                    `q=${fragment} did not find "${mindmap.title}"`,
+                );
+                expect(hit.body?.meta?.total === (hit.body?.data as any[]).length, "meta.total");
+
+                const none = await a.get(ws("/artifacts?q=zzzz-no-such-title"));
+                expect(
+                    (none.body?.data as any[]).length === 0 && none.body?.meta?.total === 0,
+                    "q matched nothing expected",
+                );
+
+                const typed = await a.get(
+                    ws(`/artifacts?q=${encodeURIComponent(fragment)}&type=QUIZ`),
+                );
+                expect(
+                    !(typed.body?.data as any[]).some((x) => x.id === state.artifactMINDMAP),
+                    "type filter ignored next to q",
+                );
+                const paged = await a.get(ws("/artifacts?q=&limit=1"));
+                expectStatus(paged, 200);
+                expect(
+                    (paged.body?.data as any[]).length === 1,
+                    "limit ignored next to an empty q",
+                );
+            },
+        );
+        await step("bulk delete artifacts: per-id results, duplicates collapsed", async () => {
+            const res = await a.post(ws("/artifacts/bulk-delete"), {
+                artifactIds: [
+                    state.artifactQUIZ,
+                    state.artifactMINDMAP,
+                    state.artifactQUIZ,
+                    "no-such-artifact",
+                ],
+            });
+            expectStatus(res, 200);
+            const { deleted, results } = res.body?.data as { deleted: number; results: any[] };
+            expect(results.length === 3, `ids not de-duplicated (${results.length} results)`);
+            expect(deleted === 2, `deleted ${deleted}`);
+            const statusOf = (id: string) => results.find((r) => r.artifactId === id)?.status;
+            expect(statusOf(state.artifactQUIZ) === "deleted", "quiz not deleted");
+            expect(statusOf(state.artifactMINDMAP) === "deleted", "mind map not deleted");
+            expect(statusOf("no-such-artifact") === "not_found", "unknown id not reported");
+            expectStatus(await a.get(ws(`/artifacts/${state.artifactQUIZ}`)), 404);
+        });
         await step("artifacts paginate and filter", async () => {
             const all = await a.get(ws("/artifacts"));
             expectStatus(all, 200);
