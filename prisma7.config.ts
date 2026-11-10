@@ -11,6 +11,8 @@ export default defineConfig({
         path: "prisma/migrations",
     },
     datasource: {
-        url: process.env["DATABASE_URL"],
+        // Migrations need a direct (non-pooled) connection on Neon. Falls back to
+        // DATABASE_URL when DIRECT_URL is unset or blank (local Docker).
+        url: process.env["DIRECT_URL"] || process.env["DATABASE_URL"],
     },
 });
