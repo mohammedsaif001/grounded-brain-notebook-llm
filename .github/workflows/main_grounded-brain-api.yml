@@ -24,16 +24,27 @@ jobs:
           node-version: '24.x'
           cache: npm
 
-      # Dev dependencies are kept: the startup command runs `prisma migrate deploy`.
       - name: npm ci and build
         run: |
           npm ci
           npm run build
 
-      # Zip so hidden folders (node_modules/.bin, which holds the prisma CLI)
-      # survive the artifact upload; upload-artifact@v4 drops dot-folders.
+      # Migrations run here, not on the server, so the server never needs the
+      # prisma CLI. Uses Neon's direct (non-pooled) URL. A failed migration stops
+      # the workflow before the new code is deployed.
+      - name: Apply database migrations
+        run: npx prisma migrate deploy
+        env:
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+
+      # Ship only what runs in production: compiled code + runtime dependencies.
+      - name: Remove dev dependencies
+        run: npm prune --omit=dev
+
+      # Zip (rather than uploading the folder) so dot-folders inside node_modules
+      # survive; upload-artifact@v4 drops hidden files.
       - name: Zip artifact for deployment
-        run: zip -r -q release.zip . -x '.git/*' -x '.github/*' -x 'src/*' -x 'docs/*'
+        run: zip -r -q release.zip dist node_modules package.json
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
