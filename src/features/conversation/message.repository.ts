@@ -8,6 +8,7 @@ const messageSelect = {
     role: true,
     content: true,
     citations: true,
+    blocked: true,
     createdAt: true,
 } as const;
 
@@ -22,6 +23,8 @@ export type CreateMessageData = {
     role: MessageRecord["role"];
     content: string;
     citations?: Prisma.InputJsonValue;
+    /** Marks a guard-blocked message or refusal; excluded from model context. */
+    blocked?: boolean;
 };
 
 /** Data access for chat messages (Postgres). */
@@ -40,14 +43,15 @@ export class MessageRepository {
     }
 
     /**
-     * Returns the latest `limit` messages, oldest first.
+     * Returns the latest `limit` non-blocked messages, oldest first. Used as model context,
+     * so guard-blocked messages and their refusals are left out.
      *
      * @param conversationId - Conversation to read
      * @param limit - Maximum number of messages
      */
     static async findRecentByConversationId(conversationId: string, limit: number) {
         const messages = await prisma.message.findMany({
-            where: { conversationId },
+            where: { conversationId, blocked: false },
             select: messageSelect,
             orderBy: { createdAt: "desc" },
             take: limit,
@@ -80,8 +84,21 @@ export class MessageRepository {
                 role: data.role,
                 content: data.content,
                 citations: data.citations,
+                blocked: data.blocked ?? false,
             },
             select: messageSelect,
+        });
+    }
+
+    /**
+     * Flags a message as guard-blocked so it is excluded from model context.
+     *
+     * @param messageId - Message to flag
+     */
+    static async markBlocked(messageId: string) {
+        await prisma.message.update({
+            where: { id: messageId },
+            data: { blocked: true },
         });
     }
 }

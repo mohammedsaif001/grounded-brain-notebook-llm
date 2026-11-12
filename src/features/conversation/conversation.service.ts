@@ -162,7 +162,17 @@ export class ConversationService {
     }
 
     /**
-     * Latest `limit` messages as model turns, oldest first.
+     * Flags a saved message as guard-blocked (e.g. a reply that leaked the system prompt), so
+     * it no longer reaches the model, summaries or Mem0.
+     *
+     * @param messageId - Message to flag
+     */
+    static markBlocked(messageId: string) {
+        return MessageRepository.markBlocked(messageId);
+    }
+
+    /**
+     * Latest `limit` non-blocked messages as model turns, oldest first.
      *
      * @param conversationId - Conversation to read
      * @param limit - Maximum number of messages

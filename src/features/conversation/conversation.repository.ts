@@ -101,7 +101,7 @@ export class ConversationRepository {
     static updateSummary(
         conversationId: string,
         data: {
-            summary: string;
+            summary: string | null;
             summaryMessageCount: number;
         },
     ) {
