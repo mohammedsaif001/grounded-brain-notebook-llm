@@ -9,6 +9,7 @@
     "dev:inngest": "npx --yes inngest-cli@latest dev --no-discovery -u http://localhost:8080/api/inngest",
     "build": "prisma generate && tsc",
     "start": "node dist/server.js",
+    "prod": "tsx --env-file=.env.production src/server.ts",
     "docker:up": "docker compose up -d --wait",
     "docker:down": "docker compose down",
     "docker:reset": "docker compose down -v && npm run docker:up && npm run db:migrate:deploy",

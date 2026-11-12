@@ -3,6 +3,7 @@
  */
 
 import { YoutubeTranscript } from "youtube-transcript";
+import { env } from "../../../config/env.js";
 import { logger } from "../../../config/logger.js";
 import { APIError } from "../../../shared/http/api-error.js";
 
@@ -59,6 +60,72 @@ function durationOf(segments: { offset: number; duration: number }[]) {
     return Math.round(inMilliseconds ? end / 1000 : end);
 }
 
+/** How long to wait for the Apify actor run (cold start plus scrape). */
+const APIFY_TIMEOUT_MS = 90_000;
+
+type ApifyItem = {
+    error?: string;
+    transcript?: { text: string; start: number; duration: number }[];
+    videoDetails?: { title?: string; author?: string; lengthSeconds?: string };
+};
+
+/**
+ * Fetches a transcript through an Apify actor, which runs from IPs YouTube does not block.
+ *
+ * @param videoId - The 11-character video id
+ * @param token - Apify API token
+ * @throws {APIError} BadRequest when the actor fails or the video has no captions
+ */
+async function fetchViaApify(videoId: string, token: string) {
+    try {
+        const response = await fetch(
+            "https://api.apify.com/v2/acts/supreme_coder~youtube-transcript-scraper/run-sync-get-dataset-items",
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                body: JSON.stringify({
+                    urls: [{ url: `https://www.youtube.com/watch?v=${videoId}` }],
+                    outputFormat: "json",
+                }),
+                signal: AbortSignal.timeout(APIFY_TIMEOUT_MS),
+            },
+        );
+        if (!response.ok) {
+            throw new Error(`Apify responded ${response.status}: ${await response.text()}`);
+        }
+
+        const [item] = (await response.json()) as ApifyItem[];
+        const content = (item?.transcript ?? [])
+            .map((segment) => segment.text)
+            .join(" ")
+            .trim();
+
+        if (!content) {
+            logger.warn({ kind: "ingest", videoId, apifyError: item?.error }, "Apify returned no transcript");
+            throw APIError.BadRequest("No transcript found for this video");
+        }
+
+        const lengthSeconds = Number(item?.videoDetails?.lengthSeconds);
+        return {
+            videoId,
+            content,
+            title: item?.videoDetails?.title,
+            author: item?.videoDetails?.author,
+            durationSeconds: Number.isFinite(lengthSeconds)
+                ? lengthSeconds
+                : durationOf(
+                      (item?.transcript ?? []).map((s) => ({ offset: s.start, duration: s.duration })),
+                  ),
+        };
+    } catch (error) {
+        if (error instanceof APIError) {
+            throw error;
+        }
+        logger.warn({ kind: "ingest", videoId, err: error }, "Apify transcript fetch failed");
+        throw APIError.BadRequest("Could not fetch transcript. The video may not have captions.");
+    }
+}
+
 /** Fetches YouTube transcripts. */
 export class YoutubeClient {
     /**
@@ -76,6 +143,10 @@ export class YoutubeClient {
 
         if (!videoId) {
             throw APIError.BadRequest("Enter a valid YouTube URL");
+        }
+
+        if (env.APIFY_TOKEN) {
+            return fetchViaApify(videoId, env.APIFY_TOKEN);
         }
 
         try {

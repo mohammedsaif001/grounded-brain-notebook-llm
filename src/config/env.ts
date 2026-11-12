@@ -74,6 +74,8 @@ const envSchema = z
         FIRECRAWL_API_KEY: optionalString,
         // Raises GitHub's API rate limit and allows private repos the token can read.
         GITHUB_TOKEN: optionalString,
+        // YouTube blocks datacenter IPs (e.g. Azure); when set, transcripts are fetched via Apify.
+        APIFY_TOKEN: optionalString,
         TAVILY_API_KEY: optionalString,
         MEM0_API_KEY: optionalString,
 
