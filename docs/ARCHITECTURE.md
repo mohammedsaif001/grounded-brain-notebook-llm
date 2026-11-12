@@ -821,10 +821,16 @@ Step by step ([`chat.service.ts`](../src/features/chat/chat.service.ts)):
     - The **system prompt** holds the rules, the user's memories and the rolling conversation summary.
     - The retrieved chunks go in the **user turn** inside `<sources><source id="1" ...>` tags,
       never in the system prompt, so untrusted document text never carries system-level authority.
-    - `escapeDelimiters` neutralises any `<source>` / `</sources>` / `<memories>` text inside documents
-      so a document can't close the block and inject instructions.
-    - With no relevant chunks, the prompt tells the model to say so and answer from general knowledge
-      (or use web search).
+    - `escapeDelimiters` neutralises any `<source>` / `</sources>` / `<memories>` /
+      `<user_question>` text inside documents and messages so neither can close a block and
+      inject instructions. The question itself sits inside `<user_question>` tags.
+    - With no relevant chunks, the prompt tells the model to say the sources don't cover it (or
+      use web search for an in-scope topic). It never falls back to general knowledge.
+    - **Guardrails** (`features/chat/guardrails/`) run before this: input sanitization and regex
+      injection rules (before any LLM call), then a scope classifier in parallel with retrieval.
+      Blocked messages get a fixed refusal and are saved with `blocked: true`, which keeps them out
+      of history, summaries and Mem0. A canary in the system prompt lets a stream filter cut off a
+      reply that leaks the prompt. See [API.md, Guardrails](API.md#guardrails).
 7. **Streaming** (`streamText`): the AI SDK streams a UI message stream that `useChat` renders
    directly. If web search is on (and Tavily is configured), the model gets a `web_search` tool;
    up to 3 steps let it search and then answer.

@@ -565,7 +565,27 @@ using web search (`[W1]`). The reply is **streamed**.
 | [400] Empty messages (`[]`)  | 400 `VALIDATION_ERROR`                                                                  |
 | [404] Unknown conversationId | 404 `NOT_FOUND`                                                                         |
 
-If a workspace has no READY sources, chat still answers from general knowledge and says so.
+### Guardrails
+
+Chat is scoped to the workspace's sources. It does **not** answer from general knowledge: when
+the sources don't cover a question, the reply says so and suggests adding a source. Every message
+passes through layered checks before the chat model sees it:
+
+| Layer                 | What it does                                                                                                                                                 |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1. Input sanitization | NFKC normalization; strips zero-width, bidi-control and Unicode tag characters; max 4000 characters (400 `BAD_REQUEST` otherwise)                            |
+| 2. Injection rules    | Regex heuristics (instruction override, prompt extraction, persona/jailbreak, chat-template and delimiter spoofing). Runs before any LLM call                |
+| 3. Scope classifier   | Small model labels the message `in_scope`, `conversational`, `off_topic`, `prompt_injection` or `harmful`, using the workspace and source titles. Fails open |
+| 4. Hardened prompt    | Fixed scope and confidentiality rules; the question is wrapped in `<user_question>` and all retrieved and stored text is escaped and treated as data         |
+| 5. Leak filter        | A per-request canary sits in the system prompt; if it appears in the reply stream, the rest of the reply is cut off and replaced with a refusal              |
+
+A blocked message still returns **200** with a normal UI message stream containing a short
+refusal, so `useChat` needs no special handling. Both the message and the refusal are saved with
+`blocked: true` (visible in `GET /conversations/:id/messages`) but excluded from model history,
+conversation summaries and Mem0, so an attack can't carry over into later turns. Blocks are logged
+at `warn` with `kind: "chat-guard"`, the layer, the category and a 120-character preview.
+
+`npm run test:guard` runs the deterministic layers (1, 2, 4 and 5) against attack and benign cases.
 
 ---
 
