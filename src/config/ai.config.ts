@@ -36,6 +36,21 @@ export const RECENT_MESSAGE_WINDOW = 12;
 /** Recent messages used to rewrite a follow-up question into a standalone retrieval query. */
 export const QUERY_REWRITE_WINDOW = 6;
 
+/** Max characters accepted in a single chat message (after sanitization). */
+export const CHAT_MAX_MESSAGE_CHARS = 4000;
+
+/** Hard cap on tokens generated for one chat reply. */
+export const CHAT_MAX_OUTPUT_TOKENS = 2000;
+
+/** Model used by the chat guard to classify the scope and intent of each message. */
+export const CHAT_GUARD_MODEL = "gpt-4o-mini";
+
+/** Max source titles shown to the chat guard so it knows what the workspace covers. */
+export const CHAT_GUARD_MAX_SOURCE_TITLES = 40;
+
+/** Max characters of a single web_search query the model may issue. */
+export const WEB_SEARCH_MAX_QUERY_CHARS = 300;
+
 /** Max Mem0 memories injected into the chat prompt. */
 export const MEMORY_SEARCH_TOP_K = 5;
 

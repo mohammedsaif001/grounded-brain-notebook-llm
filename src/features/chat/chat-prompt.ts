@@ -14,6 +14,7 @@ import {
     CHAT_SUMMARY_INTRO,
     CHAT_SYSTEM_BASE,
     CHAT_WEB_SEARCH_RULES,
+    chatCanaryLine,
     chatUserPrompt,
 } from "../../config/prompts.js";
 import type { RetrievedChunk } from "./chat.types.js";
@@ -21,11 +22,14 @@ import type { RetrievedChunk } from "./chat.types.js";
 /**
  * Neutralizes text that could close or spoof the XML-style delimiters used in prompts.
  *
- * @param text - Untrusted text (source content, titles, memories)
+ * @param text - Untrusted text (user messages, source content, titles, memories)
  * @returns Text safe to embed inside a delimited block
  */
-function escapeDelimiters(text: string) {
-    return text.replace(/<\/?(sources|source|memories)\b/gi, (match) => match.replace("<", "&lt;"));
+export function escapeDelimiters(text: string) {
+    return text.replace(
+        /<\s*\/?\s*(sources|source|memories|user_question|message|resolved|system)\b/gi,
+        (match) => match.replace("<", "&lt;"),
+    );
 }
 
 /** Builds the prompts sent to the chat model and parses its citations. */
@@ -41,6 +45,7 @@ export class ChatPrompt {
      * @param input.conversationSummary - Rolling summary of earlier turns, if one exists
      * @param input.userMemories - Mem0 facts about the user relevant to this message
      * @param input.webSearchEnabled - Whether the `web_search` tool is available this turn
+     * @param input.canary - Per-request token; seeing it in a reply means the prompt leaked
      * @returns The system prompt text
      */
     static buildSystemPrompt(input: {
@@ -48,8 +53,10 @@ export class ChatPrompt {
         conversationSummary?: string | null;
         userMemories?: string[];
         webSearchEnabled?: boolean;
+        canary: string;
     }) {
-        const sections: string[] = [...CHAT_SYSTEM_BASE];
+        // Canary first: a verbatim prompt dump hits it before anything else is streamed.
+        const sections: string[] = [chatCanaryLine(input.canary), ...CHAT_SYSTEM_BASE];
 
         if (input.webSearchEnabled) {
             sections.push(...CHAT_WEB_SEARCH_RULES);
@@ -65,7 +72,7 @@ export class ChatPrompt {
 
         const summary = input.conversationSummary?.trim();
         if (summary) {
-            sections.push(CHAT_SUMMARY_INTRO, summary);
+            sections.push(CHAT_SUMMARY_INTRO, escapeDelimiters(summary));
         }
 
         if (!input.hasSourceContext) {
@@ -85,15 +92,18 @@ export class ChatPrompt {
     }
 
     /**
-     * Wraps the user's message with the retrieved chunks as a delimited data block.
+     * Wraps the user's message in `<user_question>` tags, preceded by the retrieved chunks as
+     * a delimited `<sources>` data block when there are any.
      *
      * @param chunks - Retrieved chunks; their 1-based position is the citation number
-     * @param userText - The user's actual question
-     * @returns `userText` unchanged when there are no chunks, otherwise a `<sources>` block plus the question
+     * @param userText - The user's actual question (escaped here)
+     * @returns The user turn sent to the model
      */
     static buildUserPrompt(chunks: RetrievedChunk[], userText: string) {
+        const question = escapeDelimiters(userText);
+
         if (chunks.length === 0) {
-            return userText;
+            return chatUserPrompt(null, question);
         }
 
         const sources = chunks
@@ -111,7 +121,7 @@ export class ChatPrompt {
             })
             .join("\n");
 
-        return chatUserPrompt(sources, userText);
+        return chatUserPrompt(sources, question);
     }
 
     /**

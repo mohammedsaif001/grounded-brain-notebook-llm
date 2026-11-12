@@ -32,10 +32,23 @@ export class ConversationMemoryService {
         }
 
         const messages = await MessageRepository.findAllByConversationId(conversationId);
-        const newMessages = messages.slice(conversation.summaryMessageCount);
+        // Slice before filtering: summaryMessageCount counts every persisted message. Guard-
+        // blocked turns are then dropped so attacks never reach the summary or Mem0.
+        const newMessages = messages
+            .slice(conversation.summaryMessageCount)
+            .filter((message) => !message.blocked);
+
+        if (messages.length <= conversation.summaryMessageCount) {
+            return conversation;
+        }
 
         if (newMessages.length === 0) {
-            return conversation;
+            // Only blocked turns since the last summary: advance the counter so the summary job
+            // isn't re-queued on every message.
+            return ConversationRepository.updateSummary(conversationId, {
+                summary: conversation.summary,
+                summaryMessageCount: messages.length,
+            });
         }
 
         const transcript = newMessages
