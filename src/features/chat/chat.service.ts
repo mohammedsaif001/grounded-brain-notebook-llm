@@ -3,11 +3,12 @@
  *
  * ```
  * User message
- *   → save to DB
- *   → load recent history from DB
+ *   → guard: sanitize + injection heuristics (blocked → fixed refusal, no LLM call)
+ *   → load recent history from DB (guard-blocked turns excluded)
  *   → rewrite follow-up into standalone query
- *   → RAG retrieval + Mem0 memories
- *   → streamText (AI SDK) with optional web search tool
+ *   → guard: scope classifier ∥ RAG retrieval ∥ Mem0 memories (blocked → fixed refusal)
+ *   → save user message to DB
+ *   → streamText (AI SDK) with optional web search tool, through the prompt-leak filter
  *   → save assistant reply + cited sources
  *   → summary job (which also feeds Mem0) every N messages
  * ```
@@ -19,6 +20,7 @@ import { propagateAttributes } from "@langfuse/tracing";
 import { z } from "zod";
 import {
     createUIMessageStream,
+    generateId,
     isStepCount,
     pipeUIMessageStreamToResponse,
     streamText,
@@ -29,11 +31,13 @@ import {
 } from "ai";
 import { EventPublisher } from "../../jobs/events.js";
 import {
+    CHAT_MAX_OUTPUT_TOKENS,
     CHAT_MODEL,
     CHAT_MODELS,
     CONVERSATION_SUMMARY_INTERVAL,
     QUERY_REWRITE_WINDOW,
     RECENT_MESSAGE_WINDOW,
+    WEB_SEARCH_MAX_QUERY_CHARS,
 } from "../../config/ai.config.js";
 import { ChatPrompt } from "./chat-prompt.js";
 import { logger } from "../../config/logger.js";
@@ -43,8 +47,11 @@ import { TavilySearch, type TavilySearchResult } from "./web-search/tavily.js";
 import { APIError } from "../../shared/http/api-error.js";
 import { UIMessageUtils } from "./chat-message.util.js";
 import { ConversationService } from "../conversation/conversation.service.js";
+import type { ConversationRecord } from "../conversation/conversation.repository.js";
 import { MemoryService } from "../memory/memory.service.js";
+import { SourceService } from "../source/source.service.js";
 import type { RetrievedChunk } from "./chat.types.js";
+import { ChatGuard, type GuardVerdict } from "./guardrails/chat-guard.js";
 import { RetrievalService } from "./retrieval.service.js";
 import { WorkspaceService } from "../workspace/workspace.service.js";
 
@@ -55,6 +62,9 @@ export type ChatInput = {
     model?: string;
     webSearch?: boolean;
 };
+
+/** A guard verdict that blocked the message. */
+type BlockedVerdict = Extract<GuardVerdict, { allowed: false }>;
 
 /** Orchestrates a streamed, source-grounded chat reply. */
 export class ChatService {
@@ -124,7 +134,7 @@ export class ChatService {
      * @param userId - Requesting user; must own the workspace
      * @param input - Conversation id, messages, model choice and web-search flag
      * @returns Writes the UI message stream to `res`; sets `X-Conversation-Id` header
-     * @throws {APIError} BadRequest when no user message text is present
+     * @throws {APIError} BadRequest when no user message text is present or it is too long
      * @throws {APIError} NotFound when the conversation or workspace is not found
      */
     static stream(res: Response, workspaceId: string, userId: string, input: ChatInput) {
@@ -137,9 +147,11 @@ export class ChatService {
     }
 
     /**
-     * Does the actual work of {@link ChatService.stream}: saves the user message, rewrites the
+     * Does the actual work of {@link ChatService.stream}: runs the chat guard, rewrites the
      * query, retrieves chunks and memories, streams the model reply, then persists the answer
      * (with citations) and queues a summary job when due.
+     *
+     * Blocked messages get a fixed refusal instead of a model reply (see {@link ChatGuard}).
      *
      * @param res - Express response the stream is piped to
      * @param workspaceId - Workspace whose sources to search
@@ -158,10 +170,13 @@ export class ChatService {
         const chatModel = CHAT_MODELS.find((model) => model === requestedModel) ?? CHAT_MODEL;
         const webSearchEnabled = input.webSearch === true && TavilyClient.isConfigured();
 
-        const userText = UIMessageUtils.getLastUserText(input.messages);
-        if (!userText) {
+        const rawText = UIMessageUtils.getLastUserText(input.messages);
+        if (!rawText) {
             throw APIError.BadRequest("A user message is required");
         }
+
+        // Guard layer 1: normalize and strip invisible characters before anything reads it.
+        const userText = ChatGuard.sanitize(rawText);
 
         const conversation = await ConversationService.getOrCreate(
             workspaceId,
@@ -169,36 +184,71 @@ export class ChatService {
             userText,
         );
 
-        await ConversationService.addMessage({
-            conversationId: conversation.id,
-            role: "USER",
-            content: userText,
-        });
+        // Guard layer 2: regex heuristics, before any LLM sees the text.
+        const heuristicVerdict = ChatGuard.checkHeuristics(userText);
+        if (heuristicVerdict && !heuristicVerdict.allowed) {
+            return this.streamRefusal(res, {
+                originalMessages: input.messages,
+                conversation,
+                userId,
+                userText,
+                verdict: heuristicVerdict,
+            });
+        }
 
         // History is read from Postgres rather than trusted from the client payload, so a
         // client cannot inject fabricated assistant turns and the request body stays small no
         // matter how long the conversation gets. Older turns are covered by the rolling summary.
-        const recentTurns = await ConversationService.getRecentTurns(
+        // Read before the new message is saved; guard-blocked turns are excluded.
+        const priorTurns = await ConversationService.getRecentTurns(
             conversation.id,
-            RECENT_MESSAGE_WINDOW,
+            RECENT_MESSAGE_WINDOW - 1,
         );
-        const priorTurns = recentTurns.slice(0, -1);
 
         const retrievalQuery = await RetrievalService.rewriteQuery(
             priorTurns.slice(-QUERY_REWRITE_WINDOW),
             userText,
         );
 
-        const [retrievedChunks, userMemories] = await Promise.all([
+        // Guard layer 3 runs alongside retrieval so it adds no latency to allowed messages.
+        const [verdict, retrievedChunks, userMemories] = await Promise.all([
+            SourceService.listReady(workspaceId).then((sources) =>
+                ChatGuard.classify(userText, retrievalQuery, {
+                    workspaceTitle: workspace.title,
+                    workspaceDescription: workspace.description,
+                    sourceTitles: sources.map((source) => source.title),
+                }),
+            ),
             RetrievalService.retrieve(workspaceId, retrievalQuery),
             MemoryService.search(userId, retrievalQuery),
         ]);
+
+        if (!verdict.allowed) {
+            return this.streamRefusal(res, {
+                originalMessages: input.messages,
+                conversation,
+                userId,
+                userText,
+                verdict,
+            });
+        }
+
+        const userMessage = await ConversationService.addMessage({
+            conversationId: conversation.id,
+            role: "USER",
+            content: userText,
+        });
+
+        // Guard layers 4-5: hardened system prompt, plus a canary that detects prompt leaks.
+        const canary = ChatGuard.createCanary();
+        let leaked = false;
 
         const systemPrompt = ChatPrompt.buildSystemPrompt({
             hasSourceContext: retrievedChunks.length > 0,
             conversationSummary: conversation.summary,
             userMemories: userMemories.map((memory) => memory.memory),
             webSearchEnabled,
+            canary,
         });
 
         const modelMessages: ModelMessage[] = [
@@ -233,10 +283,13 @@ export class ChatService {
                     ? {
                           web_search: tool({
                               description:
-                                  "Search the web for up-to-date information outside the workspace sources.",
+                                  "Search the web for up-to-date detail on topics within the workspace's subject matter. Never use it for unrelated topics.",
                               inputSchema: z.object({
                                   query: z
                                       .string()
+                                      .trim()
+                                      .min(1)
+                                      .max(WEB_SEARCH_MAX_QUERY_CHARS)
                                       .describe("The search query for current web information"),
                               }),
                               execute: async ({ query }) => {
@@ -255,13 +308,25 @@ export class ChatService {
                     messages: modelMessages,
                     tools,
                     stopWhen: webSearchEnabled ? isStepCount(3) : undefined,
+                    maxOutputTokens: CHAT_MAX_OUTPUT_TOKENS,
                     telemetry: { functionId: "chat" },
                 });
 
                 totalUsage = result.totalUsage;
-                writer.merge(toUIMessageStream({ stream: result.stream }));
+                writer.merge(
+                    toUIMessageStream({ stream: result.stream }).pipeThrough(
+                        ChatGuard.createLeakFilter(canary, () => {
+                            leaked = true;
+                        }),
+                    ),
+                );
             },
             onFinish: async ({ responseMessage, isAborted }) => {
+                if (leaked) {
+                    await this.persistWithheldReply(conversation.id, userId, userMessage.id);
+                    return;
+                }
+
                 if (isAborted) {
                     return;
                 }
@@ -280,6 +345,7 @@ export class ChatService {
                         kind: "chat",
                         who: { userId, conversationId: conversation.id },
                         model: chatModel,
+                        guard: verdict.category,
                         sources: retrievedChunks.length,
                         memories: userMemories.length,
                         webSearch: webSearchEnabled ? webResults.length : false,
@@ -324,6 +390,125 @@ export class ChatService {
                         "Failed to persist assistant reply",
                     );
                 }
+            },
+        });
+
+        await pipeUIMessageStreamToResponse({
+            response: res,
+            stream,
+            headers: {
+                "X-Conversation-Id": conversation.id,
+            },
+        });
+    }
+
+    /**
+     * Records a reply the leak filter cut off: the user message is flagged and the refusal is
+     * saved in place of the leaked text, both excluded from future model context.
+     *
+     * @param conversationId - Conversation the turn belongs to
+     * @param userId - Requesting user (for logs)
+     * @param userMessageId - The already-saved user message to flag
+     */
+    private static async persistWithheldReply(
+        conversationId: string,
+        userId: string,
+        userMessageId: string,
+    ) {
+        logger.warn(
+            {
+                kind: "chat-guard",
+                layer: "output",
+                category: "output_leak",
+                who: { userId, conversationId },
+            },
+            "Chat guard withheld a reply that leaked the system prompt",
+        );
+
+        try {
+            await ConversationService.markBlocked(userMessageId);
+            await ConversationService.addMessage({
+                conversationId,
+                role: "ASSISTANT",
+                content: ChatGuard.refusal("output_leak"),
+                blocked: true,
+            });
+            await ConversationService.touch(conversationId);
+        } catch (error) {
+            logger.error({ err: error, conversationId }, "Failed to persist withheld reply");
+        }
+    }
+
+    /**
+     * Streams a fixed refusal for a guard-blocked message, in the same UI message stream
+     * format as a normal reply so the client needs no special handling.
+     *
+     * Both the user message and the refusal are saved with `blocked: true`: the user still
+     * sees them in the conversation, but they never reach the model, summaries or Mem0.
+     *
+     * @param res - Express response the stream is piped to
+     * @param input.originalMessages - Messages from the request
+     * @param input.conversation - Conversation the turn belongs to
+     * @param input.userId - Requesting user (for logs)
+     * @param input.userText - The sanitized message that was blocked
+     * @param input.verdict - Why it was blocked
+     */
+    private static async streamRefusal(
+        res: Response,
+        input: {
+            originalMessages: UIMessage[];
+            conversation: ConversationRecord;
+            userId: string;
+            userText: string;
+            verdict: BlockedVerdict;
+        },
+    ) {
+        const { conversation, verdict } = input;
+        const refusal = ChatGuard.refusal(verdict.category);
+
+        // Only a short preview is logged: the message may be long or contain private data.
+        logger.warn(
+            {
+                kind: "chat-guard",
+                layer: verdict.layer,
+                category: verdict.category,
+                reason: verdict.reason,
+                who: { userId: input.userId, conversationId: conversation.id },
+                preview: input.userText.slice(0, 120),
+            },
+            `Chat guard blocked a message (${verdict.category} via ${verdict.layer})`,
+        );
+
+        try {
+            await ConversationService.addMessage({
+                conversationId: conversation.id,
+                role: "USER",
+                content: input.userText,
+                blocked: true,
+            });
+            await ConversationService.addMessage({
+                conversationId: conversation.id,
+                role: "ASSISTANT",
+                content: refusal,
+                blocked: true,
+            });
+            await ConversationService.touch(conversation.id);
+        } catch (error) {
+            logger.error(
+                { err: error, conversationId: conversation.id },
+                "Failed to persist blocked turn",
+            );
+        }
+
+        const stream = createUIMessageStream({
+            originalMessages: input.originalMessages,
+            execute: ({ writer }) => {
+                const id = generateId();
+                writer.write({ type: "start" });
+                writer.write({ type: "text-start", id });
+                writer.write({ type: "text-delta", id, delta: refusal });
+                writer.write({ type: "text-end", id });
+                writer.write({ type: "finish", finishReason: "stop" });
             },
         });
 
