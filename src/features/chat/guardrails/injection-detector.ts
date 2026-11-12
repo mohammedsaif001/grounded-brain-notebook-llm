@@ -10,6 +10,8 @@
  * classifier in `ChatGuard`, and delimiter look-alikes are escaped rather than blocked.
  */
 
+import { InputSanitizer } from "./input-sanitizer.js";
+
 /** One named detection rule. */
 type InjectionRule = {
     name: string;
@@ -87,7 +89,7 @@ const RULES: InjectionRule[] = [
     {
         // Delimiters only this app uses; ordinary HTML-ish tags like <source> are escaped instead.
         name: "delimiter_spoofing",
-        pattern: /<\/?\s*(?:system|user_question|memories|resolved)\s*>/i,
+        pattern: /<\/?\s*(?:system|user_question|memories|conversation_summary|resolved)\s*>/i,
     },
     {
         // A line pretending to open a privileged turn: "SYSTEM PROMPT: ..." or "### Instructions"
@@ -105,13 +107,14 @@ export class InjectionDetector {
     /**
      * Scans a sanitized message for known prompt-injection patterns.
      *
-     * Runs of spaces and tabs are collapsed first so padded attacks still match.
+     * Scans a folded copy ({@link InputSanitizer.forDetection}) with runs of spaces and tabs
+     * collapsed, so look-alike letters, hidden joiners and padding can't dodge the rules.
      *
-     * @param text - Message text, already passed through `InputSanitizer`
+     * @param text - Message text, already passed through `InputSanitizer.sanitize`
      * @returns The first rule that matched, or `{ detected: false }`
      */
     static scan(text: string): InjectionScan {
-        const collapsed = text.replace(/[ \t]+/g, " ");
+        const collapsed = InputSanitizer.forDetection(text).replace(/[ \t]+/g, " ");
 
         for (const rule of RULES) {
             if (rule.pattern.test(collapsed)) {

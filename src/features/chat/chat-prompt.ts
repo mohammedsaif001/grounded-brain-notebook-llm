@@ -6,12 +6,10 @@
 
 import {
     CHAT_GROUNDED_RULES,
-    CHAT_MEMORIES_INTRO,
     CHAT_NO_INVENTED_CITATIONS,
     CHAT_NO_SOURCES_NOTICE,
     CHAT_NO_SOURCES_WITHOUT_WEB_SEARCH,
     CHAT_NO_SOURCES_WITH_WEB_SEARCH,
-    CHAT_SUMMARY_INTRO,
     CHAT_SYSTEM_BASE,
     CHAT_WEB_SEARCH_RULES,
     chatCanaryLine,
@@ -27,7 +25,7 @@ import type { RetrievedChunk } from "./chat.types.js";
  */
 export function escapeDelimiters(text: string) {
     return text.replace(
-        /<\s*\/?\s*(sources|source|memories|user_question|message|resolved|system)\b/gi,
+        /<\s*\/?\s*(sources|source|memories|conversation_summary|user_question|message|resolved|system)\b/gi,
         (match) => match.replace("<", "&lt;"),
     );
 }
@@ -35,23 +33,19 @@ export function escapeDelimiters(text: string) {
 /** Builds the prompts sent to the chat model and parses its citations. */
 export class ChatPrompt {
     /**
-     * Builds the chat system prompt: behavior rules, user memories, and conversation summary.
+     * Builds the chat system prompt: fixed behavior, scope, security and grounding rules only.
      *
-     * Retrieved source text is deliberately NOT placed here; it goes into the user turn via
-     * {@link ChatPrompt.buildUserPrompt} so untrusted document content never carries
-     * system-level authority.
+     * Nothing derived from user-written text is placed here. Retrieved sources, memories and
+     * the conversation summary all go into the user turn via {@link ChatPrompt.buildUserPrompt}
+     * so they never carry system-level authority.
      *
      * @param input.hasSourceContext - Whether any source chunks were retrieved (switches grounding rules)
-     * @param input.conversationSummary - Rolling summary of earlier turns, if one exists
-     * @param input.userMemories - Mem0 facts about the user relevant to this message
      * @param input.webSearchEnabled - Whether the `web_search` tool is available this turn
      * @param input.canary - Per-request token; seeing it in a reply means the prompt leaked
      * @returns The system prompt text
      */
     static buildSystemPrompt(input: {
         hasSourceContext: boolean;
-        conversationSummary?: string | null;
-        userMemories?: string[];
         webSearchEnabled?: boolean;
         canary: string;
     }) {
@@ -60,19 +54,6 @@ export class ChatPrompt {
 
         if (input.webSearchEnabled) {
             sections.push(...CHAT_WEB_SEARCH_RULES);
-        }
-
-        if (input.userMemories?.length) {
-            const memoryBlock = input.userMemories
-                .map((memory) => `- ${escapeDelimiters(memory)}`)
-                .join("\n");
-
-            sections.push(CHAT_MEMORIES_INTRO, `<memories>\n${memoryBlock}\n</memories>`);
-        }
-
-        const summary = input.conversationSummary?.trim();
-        if (summary) {
-            sections.push(CHAT_SUMMARY_INTRO, escapeDelimiters(summary));
         }
 
         if (!input.hasSourceContext) {
@@ -92,21 +73,27 @@ export class ChatPrompt {
     }
 
     /**
-     * Wraps the user's message in `<user_question>` tags, preceded by the retrieved chunks as
-     * a delimited `<sources>` data block when there are any.
+     * Builds the user turn: the conversation summary, memories and retrieved chunks as escaped,
+     * delimited data blocks, then the question in `<user_question>` tags.
      *
-     * @param chunks - Retrieved chunks; their 1-based position is the citation number
-     * @param userText - The user's actual question (escaped here)
+     * @param input.chunks - Retrieved chunks; their 1-based position is the citation number
+     * @param input.userText - The user's actual question
+     * @param input.userMemories - Mem0 facts about the user relevant to this message
+     * @param input.conversationSummary - Rolling summary of earlier turns, if one exists
      * @returns The user turn sent to the model
      */
-    static buildUserPrompt(chunks: RetrievedChunk[], userText: string) {
-        const question = escapeDelimiters(userText);
+    static buildUserPrompt(input: {
+        chunks: RetrievedChunk[];
+        userText: string;
+        userMemories?: string[];
+        conversationSummary?: string | null;
+    }) {
+        const summary = input.conversationSummary?.trim();
+        const memories = input.userMemories?.length
+            ? input.userMemories.map((memory) => `- ${escapeDelimiters(memory)}`).join("\n")
+            : null;
 
-        if (chunks.length === 0) {
-            return chatUserPrompt(null, question);
-        }
-
-        const sources = chunks
+        const sources = input.chunks
             .map((chunk, index) => {
                 const attributes = [
                     `id="${index + 1}"`,
@@ -121,7 +108,12 @@ export class ChatPrompt {
             })
             .join("\n");
 
-        return chatUserPrompt(sources, question);
+        return chatUserPrompt({
+            summary: summary ? escapeDelimiters(summary) : null,
+            memories,
+            sources: sources || null,
+            question: escapeDelimiters(input.userText),
+        });
     }
 
     /**

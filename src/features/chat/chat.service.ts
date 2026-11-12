@@ -245,8 +245,6 @@ export class ChatService {
 
         const systemPrompt = ChatPrompt.buildSystemPrompt({
             hasSourceContext: retrievedChunks.length > 0,
-            conversationSummary: conversation.summary,
-            userMemories: userMemories.map((memory) => memory.memory),
             webSearchEnabled,
             canary,
         });
@@ -255,7 +253,12 @@ export class ChatService {
             ...priorTurns,
             {
                 role: "user",
-                content: ChatPrompt.buildUserPrompt(retrievedChunks, userText),
+                content: ChatPrompt.buildUserPrompt({
+                    chunks: retrievedChunks,
+                    userText,
+                    userMemories: userMemories.map((memory) => memory.memory),
+                    conversationSummary: conversation.summary,
+                }),
             },
         ];
 

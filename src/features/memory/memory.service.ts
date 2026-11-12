@@ -1,5 +1,7 @@
 import { MemoryRepository, type MemoryMessage } from "./memory.repository.js";
 import { APIError } from "../../shared/http/api-error.js";
+import { InjectionDetector } from "../chat/guardrails/injection-detector.js";
+import { InputSanitizer } from "../chat/guardrails/input-sanitizer.js";
 
 /** User memory business logic (manual memories plus memories learned from chat). */
 export class MemoryService {
@@ -18,6 +20,29 @@ export class MemoryService {
         if (!memory || memory.userId !== userId) {
             throw APIError.NotFound("Memory not found");
         }
+    }
+
+    /**
+     * Rejects memory text that tries to carry instructions into the chat prompt.
+     *
+     * Memories are injected into every relevant chat turn, so without this a user could store
+     * "ignore all rules" once and bypass the chat guard on every later message.
+     *
+     * @param text - Memory text from the client
+     * @returns The sanitized text
+     * @throws {APIError} BadRequest when the text matches a prompt-injection pattern
+     */
+    private static validateText(text: string) {
+        const clean = InputSanitizer.sanitize(text);
+        const scan = InjectionDetector.scan(clean);
+
+        if (scan.detected) {
+            throw APIError.BadRequest(
+                "Memories must be facts about you, not instructions for the assistant.",
+            );
+        }
+
+        return clean;
     }
 
     /**
@@ -47,7 +72,7 @@ export class MemoryService {
      */
     static create(userId: string, input: { memory: string }) {
         return MemoryRepository.create(userId, {
-            memory: input.memory,
+            memory: this.validateText(input.memory),
             metadata: { source: "manual" },
         });
     }
@@ -76,8 +101,9 @@ export class MemoryService {
      * @throws {APIError} NotFound when the memory is missing or owned by another user
      */
     static async update(userId: string, memoryId: string, input: { memory: string }) {
+        const memory = this.validateText(input.memory);
         await this.assertOwnedByUser(userId, memoryId);
-        return MemoryRepository.update(memoryId, input);
+        return MemoryRepository.update(memoryId, { memory });
     }
 
     /**
